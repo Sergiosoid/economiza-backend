@@ -267,7 +267,7 @@ def _update_user_subscription(
         return
     
     user.is_pro = is_pro
-    user.stripe_subscription_id = subscription_id
+    user.subscription_id = subscription_id
     
     # Atualizar customer_id se fornecido
     if customer_id:
@@ -299,7 +299,7 @@ async def get_subscription_status(
     
     return {
         "is_pro": user.is_pro,
-        "subscription_id": user.stripe_subscription_id,
+        "subscription_id": user.subscription_id,
         "customer_id": user.stripe_customer_id,
         "plan": "pro" if user.is_pro else None
     }

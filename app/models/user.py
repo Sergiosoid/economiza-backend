@@ -15,8 +15,6 @@ class User(Base):
     consent_terms = Column(Boolean, default=False, nullable=False)
     is_pro = Column(Boolean, default=False, nullable=False, index=True)
     stripe_customer_id = Column(String(255), nullable=True, index=True)
-    stripe_subscription_id = Column(String(255), nullable=True, index=True)
-    # Manter subscription_id para compatibilidade (deprecated)
     subscription_id = Column(String(255), nullable=True, index=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
