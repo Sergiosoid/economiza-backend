@@ -251,6 +251,49 @@ class ProviderClient:
         
         raise ProviderError("Erro ao buscar nota fiscal após todas as tentativas")
     
+    def _get_fake_data(self, key: str) -> Dict[str, Any]:
+        """
+        Retorna dados fake para desenvolvimento.
+        Nunca faz requisições reais.
+        """
+        logger.info(f"Using fake provider for key: {key[:10]}...")
+        
+        # Gerar dados fake baseados na chave
+        return {
+            "access_key": key,
+            "store": {
+                "name": "SUPERMERCADO FAKE",
+                "cnpj": "12345678000190"
+            },
+            "total": "125.30",
+            "subtotal": "119.00",
+            "tax": "6.30",
+            "emitted_at": "2024-01-15T10:30:00-03:00",
+            "items": [
+                {
+                    "description": "ARROZ TIPO 1 5KG",
+                    "quantity": 1,
+                    "unit_price": "25.50",
+                    "total_price": "25.50",
+                    "tax_value": "1.20"
+                },
+                {
+                    "description": "FEIJAO PRETO 1KG",
+                    "quantity": 2,
+                    "unit_price": "8.50",
+                    "total_price": "17.00",
+                    "tax_value": "0.85"
+                },
+                {
+                    "description": "ACUCAR CRISTAL 1KG",
+                    "quantity": 1,
+                    "unit_price": "4.80",
+                    "total_price": "4.80",
+                    "tax_value": "0.24"
+                }
+            ]
+        }
+    
     def fetch_by_key(self, key: str) -> Dict[str, Any]:
         """
         Busca nota fiscal por chave de acesso usando API do provider.
@@ -267,6 +310,11 @@ class ProviderClient:
             ProviderRateLimit: Se exceder rate limit (429)
             ProviderUnauthorized: Se houver erro de autenticação (401/403)
         """
+        # Modo fake: retornar dados fake sem fazer requisições
+        if self.provider_name == "fake":
+            return self._get_fake_data(key)
+        
+        # Modo real: validar configuração
         if not self.api_url or not self.app_key or not self.app_secret:
             raise ProviderError("Provider não configurado. Configure PROVIDER_API_URL, PROVIDER_APP_KEY e PROVIDER_APP_SECRET")
         
@@ -345,7 +393,15 @@ class ProviderClient:
         """
         logger.info(f"Fetching note from URL: {url}")
         
-        # Validar URL (anti-SSRF)
+        # Modo fake: extrair chave e retornar dados fake
+        if self.provider_name == "fake":
+            access_key = _extract_key_from_url(url)
+            if not access_key:
+                # Se não conseguir extrair, usar chave padrão
+                access_key = "35200112345678901234567890123456789012345678"
+            return self._get_fake_data(access_key)
+        
+        # Modo real: validar URL (anti-SSRF)
         if not _validate_url(url):
             logger.error(f"provider_fetch_fail: URL não permitida (SSRF protection): {url}")
             raise ProviderError("URL não permitida por questões de segurança")

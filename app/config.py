@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: list[str] = ["*"]
     
-    # Provider API (Webmania/Serpro/Oobj)
-    PROVIDER_NAME: str = "webmania"  # webmania | oobj | serpro
+    # Provider API (Webmania/Serpro/Oobj/Fake)
+    PROVIDER_NAME: str = "fake"  # fake | webmania | oobj | serpro
     PROVIDER_API_URL: Optional[str] = None
     PROVIDER_APP_KEY: Optional[str] = None
     PROVIDER_APP_SECRET: Optional[str] = None
