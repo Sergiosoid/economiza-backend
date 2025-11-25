@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_IP: str = "30/minute"
     RATE_LIMIT_PER_USER: str = "60/minute"
     
+    # Encryption (Fernet key - 32 bytes base64 encoded)
+    # TODO: Migrate to KMS (AWS KMS, Azure Key Vault, etc.)
+    ENCRYPTION_KEY: str = ""
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

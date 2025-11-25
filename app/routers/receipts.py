@@ -127,6 +127,26 @@ async def scan_receipt(
     
     logger.info("qr_received", extra={"user_id": str(user_id), "qr_length": len(scan_request.qr_text)})
     
+    # Verificar consentimento (LGPD)
+    from app.models.user import User
+    from sqlalchemy import and_
+    user = db.query(User).filter(
+        and_(User.id == user_id, User.deleted_at.is_(None))
+    ).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    if not user.consent_given:
+        logger.warning(f"Scan attempt without consent: user_id={user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Consent required. Please provide consent before scanning receipts."
+        )
+    
     try:
         # 1. Extrair chave de acesso ou URL
         try:
