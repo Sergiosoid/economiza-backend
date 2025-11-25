@@ -124,7 +124,8 @@ def fuzzy_match(
         return None
     
     # Criar lista de nomes normalizados para matching
-    product_names = {p.id: p.normalized_name for p in products if p.normalized_name}
+    # Usar normalized_name como chave e id (string) como valor para que extractOne retorne o id
+    product_names = {p.normalized_name: str(p.id) for p in products if p.normalized_name}
     
     if not product_names:
         return None
@@ -138,7 +139,8 @@ def fuzzy_match(
     )
     
     if result:
-        product_id, score, matched_name = result
+        matched_name, score, product_id_str = result
+        product_id = UUID(product_id_str)
         logger.debug(f"Product fuzzy matched: '{name_normalized}' -> {product_id} (score: {score:.1f}%)")
         return product_id
     

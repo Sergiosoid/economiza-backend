@@ -185,20 +185,7 @@ async def scan_receipt(
                 detail="invalid qr code"
             )
         
-        # 2. Verificar idempotência (se temos access_key)
-        if access_key:
-            existing_receipt = check_receipt_exists(db, user_id, access_key)
-            if existing_receipt:
-                logger.info(f"receipt_already_exists: {existing_receipt.id}")
-                return JSONResponse(
-                    status_code=status.HTTP_409_CONFLICT,
-                    content={
-                        "detail": "receipt already exists",
-                        "receipt_id": str(existing_receipt.id)
-                    }
-                )
-        
-        # 3. Consultar provider
+        # 2. Consultar provider
         try:
             if url:
                 raw_note = fetch_by_url(url)
@@ -212,14 +199,41 @@ async def scan_receipt(
                 detail="provider error"
             )
         
-        # 4. Decidir se processa em background
+        # 3. Processar dados para obter access_key final
+        try:
+            parsed_data = parse_note(raw_note)
+            # Garantir que access_key está presente (usar o extraído ou o original)
+            final_access_key = parsed_data.get("access_key") or access_key
+            if not final_access_key:
+                raise ValueError("Não foi possível extrair access_key da nota fiscal")
+            parsed_data["access_key"] = final_access_key
+        except ValueError as e:
+            logger.error(f"parse_error: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"invalid qr code: {str(e)}"
+            )
+        
+        # 4. Verificar idempotência (após parsing para garantir access_key correto)
+        existing_receipt = check_receipt_exists(db, user_id, parsed_data["access_key"])
+        if existing_receipt:
+            logger.info(f"receipt_already_exists: {existing_receipt.id}")
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content={
+                    "detail": "receipt already exists",
+                    "receipt_id": str(existing_receipt.id)
+                }
+            )
+        
+        # 5. Decidir se processa em background
         if _should_process_in_background(raw_note):
             # Enfileirar task
             task = process_receipt_task.delay(
                 user_id=str(user_id),
                 raw_note=raw_note,
                 qr_text=scan_request.qr_text,
-                access_key=access_key or ""
+                access_key=parsed_data["access_key"]
             )
             
             logger.info(f"Receipt queued for background processing: task_id={task.id}")
@@ -230,19 +244,6 @@ async def scan_receipt(
                     "task_id": task.id,
                     "message": "Receipt está sendo processado em background"
                 }
-            )
-        
-        # 5. Processar síncrono (notas pequenas)
-        try:
-            parsed_data = parse_note(raw_note)
-            # Garantir que access_key está presente
-            if not parsed_data.get("access_key") and access_key:
-                parsed_data["access_key"] = access_key
-        except ValueError as e:
-            logger.error(f"parse_error: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"invalid qr code: {str(e)}"
             )
         
         # 6. Salvar no banco

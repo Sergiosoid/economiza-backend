@@ -97,7 +97,7 @@ def save_receipt(
     try:
         # Criptografar dados sensíveis
         encrypted_qr = encrypt_sensitive_data(raw_qr_text)
-        encrypted_xml = encrypt_sensitive_data(xml_raw) if xml_raw else None
+        # Nota: xml_raw não é salvo no modelo Receipt atual, apenas raw_qr_text
         
         # Criar receipt
         receipt = Receipt(
