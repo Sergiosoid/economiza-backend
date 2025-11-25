@@ -23,6 +23,17 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_KEY: str = ""
     
+    # Redis (para Celery e rate limiting)
+    REDIS_URL: str = "redis://localhost:6379/0"
+    
+    # Celery
+    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    
+    # Rate Limiting
+    RATE_LIMIT_PER_IP: str = "30/minute"
+    RATE_LIMIT_PER_USER: str = "60/minute"
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

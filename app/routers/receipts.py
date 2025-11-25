@@ -2,7 +2,8 @@
 Router para endpoints de receipts (notas fiscais)
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+import json
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
@@ -16,9 +17,16 @@ from app.services.receipt_service import (
     check_receipt_exists,
     save_receipt
 )
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from app.tasks.receipt_tasks import process_receipt_task
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Tamanho limite para processar em background (em bytes de JSON serializado)
+BACKGROUND_PROCESSING_THRESHOLD = 50000  # ~50KB
 
 
 class ScanReceiptRequest(BaseModel):
@@ -39,39 +47,90 @@ class ScanReceiptResponse(BaseModel):
     status: str
 
 
+class ScanReceiptProcessingResponse(BaseModel):
+    status: str
+    task_id: str
+    message: str
+
+
+def _should_process_in_background(raw_note: dict) -> bool:
+    """
+    Decide se o processamento deve ser feito em background.
+    Considera tamanho do XML/JSON e complexidade.
+    """
+    try:
+        # Serializar para estimar tamanho
+        serialized = json.dumps(raw_note)
+        size = len(serialized.encode('utf-8'))
+        
+        # Se for muito grande, processar em background
+        if size > BACKGROUND_PROCESSING_THRESHOLD:
+            logger.info(f"Note size ({size} bytes) exceeds threshold, queuing for background processing")
+            return True
+        
+        # Se tiver muitos itens, também processar em background
+        if isinstance(raw_note, dict):
+            # Tentar contar itens
+            items_count = 0
+            if "items" in raw_note:
+                items_count = len(raw_note["items"])
+            elif "det" in raw_note:
+                det = raw_note["det"]
+                items_count = len(det) if isinstance(det, list) else 1
+            
+            if items_count > 50:
+                logger.info(f"Note has {items_count} items, queuing for background processing")
+                return True
+        
+        return False
+    except Exception:
+        # Em caso de erro, processar em background por segurança
+        return True
+
+
 @router.post(
     "/receipts/scan",
-    response_model=ScanReceiptResponse,
     status_code=status.HTTP_200_OK,
     responses={
         200: {"description": "Receipt salvo com sucesso"},
+        202: {"description": "Receipt em processamento em background"},
         400: {"description": "QR code inválido"},
         409: {"description": "Receipt já existe"},
+        429: {"description": "Rate limit excedido"},
         500: {"description": "Erro do provider"},
     }
 )
 async def scan_receipt(
-    request: ScanReceiptRequest,
+    request: Request,
+    scan_request: ScanReceiptRequest,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user)
 ):
     """
     Endpoint para escanear QR code de nota fiscal e salvar no banco.
     
+    Para notas grandes ou complexas, o processamento é feito em background
+    e retorna 202 Accepted com task_id.
+    
+    Rate limiting: 30 req/min por IP, 60 req/min por usuário.
+    
     Fluxo completo:
     1. Recebe qr_text
     2. Extrai chave de acesso ou URL
     3. Consulta a nota fiscal em um provedor externo
-    4. Parseia a nota (itens, loja, impostos, total)
-    5. Salva em receipts, products e receipt_items
-    6. Retorna receipt_id
+    4. Decide se processa síncrono ou assíncrono
+    5. Parseia e salva (ou enfileira)
+    6. Retorna receipt_id ou task_id
     """
-    logger.info("qr_received", extra={"user_id": str(user_id), "qr_length": len(request.qr_text)})
+    # Rate limiting é aplicado automaticamente pelo middleware slowapi
+    # Limites: 30 req/min por IP (padrão), 60 req/min por usuário (aplicado via decorator se necessário)
+    
+    logger.info("qr_received", extra={"user_id": str(user_id), "qr_length": len(scan_request.qr_text)})
     
     try:
         # 1. Extrair chave de acesso ou URL
         try:
-            url, access_key = extract_key_or_url(request.qr_text)
+            url, access_key = extract_key_or_url(scan_request.qr_text)
         except ValueError as e:
             logger.warning(f"invalid_qr_code: {str(e)}")
             raise HTTPException(
@@ -106,7 +165,27 @@ async def scan_receipt(
                 detail="provider error"
             )
         
-        # 4. Parsear nota
+        # 4. Decidir se processa em background
+        if _should_process_in_background(raw_note):
+            # Enfileirar task
+            task = process_receipt_task.delay(
+                user_id=str(user_id),
+                raw_note=raw_note,
+                qr_text=scan_request.qr_text,
+                access_key=access_key or ""
+            )
+            
+            logger.info(f"Receipt queued for background processing: task_id={task.id}")
+            return JSONResponse(
+                status_code=status.HTTP_202_ACCEPTED,
+                content={
+                    "status": "processing",
+                    "task_id": task.id,
+                    "message": "Receipt está sendo processado em background"
+                }
+            )
+        
+        # 5. Processar síncrono (notas pequenas)
         try:
             parsed_data = parse_note(raw_note)
             # Garantir que access_key está presente
@@ -119,11 +198,10 @@ async def scan_receipt(
                 detail=f"invalid qr code: {str(e)}"
             )
         
-        # 5. Salvar no banco
+        # 6. Salvar no banco
         try:
             xml_raw = None
             if isinstance(raw_note, dict):
-                import json
                 xml_raw = json.dumps(raw_note)
             elif isinstance(raw_note, str):
                 xml_raw = raw_note
@@ -132,7 +210,7 @@ async def scan_receipt(
                 db=db,
                 user_id=user_id,
                 parsed_data=parsed_data,
-                raw_qr_text=request.qr_text,
+                raw_qr_text=scan_request.qr_text,
                 xml_raw=xml_raw
             )
             
