@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/user/export-data")
+@router.get(
+    "/user/export-data",
+    dependencies=[Depends(get_current_user)]
+)
 async def export_user_data(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user)
@@ -219,7 +222,10 @@ async def export_user_data(
     )
 
 
-@router.delete("/user/delete-account")
+@router.delete(
+    "/user/delete-account",
+    dependencies=[Depends(get_current_user)]
+)
 async def delete_user_account(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user)
@@ -263,7 +269,10 @@ async def delete_user_account(
     return {"message": "Account deleted. Data will be permanently removed after 30 days."}
 
 
-@router.post("/user/consent")
+@router.post(
+    "/user/consent",
+    dependencies=[Depends(get_current_user)]
+)
 async def give_consent(
     consent_terms: bool = True,
     db: Session = Depends(get_db),

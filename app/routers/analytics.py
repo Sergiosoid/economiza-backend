@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/analytics/monthly-summary")
+@router.get(
+    "/analytics/monthly-summary",
+    dependencies=[Depends(get_current_user)]
+)
 async def monthly_summary(
     year: int = Query(..., description="Ano (ex: 2024)"),
     month: int = Query(..., ge=1, le=12, description="Mês (1-12)"),
@@ -56,7 +59,10 @@ async def monthly_summary(
         )
 
 
-@router.get("/analytics/top-items")
+@router.get(
+    "/analytics/top-items",
+    dependencies=[Depends(get_current_user)]
+)
 async def top_items(
     limit: int = Query(20, ge=1, le=100, description="Número máximo de itens"),
     db: Session = Depends(get_db),
@@ -93,7 +99,10 @@ async def top_items(
         )
 
 
-@router.get("/analytics/compare-store")
+@router.get(
+    "/analytics/compare-store",
+    dependencies=[Depends(get_current_user)]
+)
 async def compare_store(
     product_id: UUID = Query(..., description="ID do produto"),
     db: Session = Depends(get_db),

@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/ai/suggestions")
+@router.get(
+    "/ai/suggestions",
+    dependencies=[Depends(get_current_user)]
+)
 async def get_savings_suggestions(
     limit: int = Query(default=3, ge=1, le=10, description="Número máximo de sugestões"),
     db: Session = Depends(get_db),

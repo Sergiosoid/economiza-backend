@@ -92,6 +92,7 @@ def _should_process_in_background(raw_note: dict) -> bool:
 @router.post(
     "/receipts/scan",
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(get_current_user)],
     responses={
         200: {"description": "Receipt salvo com sucesso"},
         202: {"description": "Receipt em processamento em background"},

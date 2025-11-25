@@ -34,7 +34,10 @@ PLANS = {
 }
 
 
-@router.post("/payments/create-checkout-session")
+@router.post(
+    "/payments/create-checkout-session",
+    dependencies=[Depends(get_current_user)]
+)
 async def create_checkout_session(
     plan: str = "pro",
     db: Session = Depends(get_db),
@@ -275,7 +278,10 @@ def _update_user_subscription(
     logger.info(f"User {user_id} updated: is_pro={is_pro}, subscription_id={subscription_id}, customer_id={customer_id}")
 
 
-@router.get("/payments/subscription-status")
+@router.get(
+    "/payments/subscription-status",
+    dependencies=[Depends(get_current_user)]
+)
 async def get_subscription_status(
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user)
