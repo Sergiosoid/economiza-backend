@@ -480,7 +480,7 @@ docker-compose up -d
 
 2. **Execute as migrações:**
 ```bash
-docker-compose exec web alembic upgrade head
+docker-compose exec backend alembic upgrade head
 ```
 
 3. **Acesse a API:**
@@ -496,7 +496,7 @@ docker-compose down
 
 5. **Ver logs:**
 ```bash
-docker-compose logs -f web
+docker-compose logs -f backend
 ```
 
 ### Build da imagem Docker
@@ -506,9 +506,19 @@ docker build -t economiza-backend .
 docker run -p 8000:8000 --env-file .env economiza-backend
 ```
 
-## Deploy no Render
+## Deploy
 
-### Pré-requisitos
+### Opções de Deploy
+
+O Economiza pode ser deployado em várias plataformas:
+
+- **Render** (recomendado para começar)
+- **Railway** (alternativa simples)
+- **AWS/GCP/Azure** (para produção em escala)
+
+### Deploy no Render
+
+#### Pré-requisitos
 
 1. Conta no [Render](https://render.com)
 2. Repositório no GitHub
@@ -612,6 +622,59 @@ Render verifica automaticamente o endpoint `/health`:
 - **Metrics:** Render fornece métricas básicas
 - **Alerts:** Configure alertas para downtime
 
+### Deploy no Railway
+
+#### Pré-requisitos
+
+1. Conta no [Railway](https://railway.app)
+2. Repositório no GitHub
+3. Cartão de crédito (para serviços pagos)
+
+#### Passo a Passo
+
+1. **Criar Projeto:**
+   - Acesse: https://railway.app
+   - Clique em "New Project"
+   - Selecione "Deploy from GitHub repo"
+   - Conecte seu repositório
+
+2. **Adicionar PostgreSQL:**
+   - No projeto, clique em "+ New"
+   - Selecione "Database" → "PostgreSQL"
+   - Railway cria automaticamente e fornece `DATABASE_URL`
+
+3. **Adicionar Redis:**
+   - Clique em "+ New"
+   - Selecione "Database" → "Redis"
+   - Railway cria automaticamente e fornece `REDIS_URL`
+
+4. **Configurar Serviço:**
+   - Railway detecta automaticamente o Dockerfile
+   - Configure variáveis de ambiente:
+     - Use as variáveis do PostgreSQL e Redis criados
+     - Adicione todas as outras do `.env.example`
+
+5. **Deploy:**
+   - Railway faz deploy automático a cada push em `main`
+   - Acesse a URL fornecida pelo Railway
+
+#### Variáveis de Ambiente no Railway
+
+Railway fornece automaticamente:
+- `DATABASE_URL` (do PostgreSQL)
+- `REDIS_URL` (do Redis)
+
+Você precisa adicionar manualmente:
+- `STRIPE_SECRET_KEY`
+- `STRIPE_PUBLISHABLE_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRICE_ID_PRO`
+- `ENCRYPTION_KEY`
+- `PROVIDER_APP_KEY`
+- `PROVIDER_APP_SECRET`
+- `FRONTEND_URL`
+- Outras variáveis do `.env.example`
+
 ## Testes
 
 Execute os testes com:
@@ -632,7 +695,7 @@ pytest tests/test_payments.py -v
 ### Testes com Docker
 
 ```bash
-docker-compose exec web pytest tests/ -v
+docker-compose exec backend pytest tests/ -v
 ```
 
 ## Analytics
