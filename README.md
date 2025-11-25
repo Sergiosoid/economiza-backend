@@ -635,6 +635,142 @@ pytest tests/test_payments.py -v
 docker-compose exec web pytest tests/ -v
 ```
 
+## Analytics
+
+O sistema fornece endpoints de analytics para análise de gastos e comparação de preços.
+
+### Endpoints
+
+#### GET `/api/v1/analytics/monthly-summary`
+
+Retorna resumo mensal de gastos do usuário.
+
+**Query Parameters:**
+- `year`: Ano (ex: 2024)
+- `month`: Mês (1-12)
+- `use_cache`: Usar cache se disponível (padrão: true)
+
+**Response:**
+```json
+{
+  "total_mes": 1250.50,
+  "total_por_categoria": {
+    "Alimentos": 850.30,
+    "Bebidas": 200.20,
+    "Limpeza": 200.00
+  },
+  "top_10_itens": [
+    {
+      "description": "ARROZ TIPO 1 5KG",
+      "total_quantity": 4.0,
+      "total_spent": 102.00,
+      "purchase_count": 2
+    },
+    {
+      "description": "FEIJAO PRETO 1KG",
+      "total_quantity": 6.0,
+      "total_spent": 51.00,
+      "purchase_count": 3
+    }
+  ],
+  "variacao_vs_mes_anterior": 15.5,
+  "month": "2024-04"
+}
+```
+
+**Exemplo de uso:**
+```bash
+GET /api/v1/analytics/monthly-summary?year=2024&month=4
+Authorization: Bearer <token>
+```
+
+#### GET `/api/v1/analytics/top-items`
+
+Retorna os itens mais comprados pelo usuário.
+
+**Query Parameters:**
+- `limit`: Número máximo de itens (padrão: 20, máximo: 100)
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "description": "ARROZ TIPO 1 5KG",
+      "total_quantity": 12.0,
+      "total_spent": 306.00,
+      "avg_price": 25.50,
+      "purchase_count": 5
+    },
+    {
+      "description": "FEIJAO PRETO 1KG",
+      "total_quantity": 10.0,
+      "total_spent": 85.00,
+      "avg_price": 8.50,
+      "purchase_count": 4
+    }
+  ],
+  "count": 2
+}
+```
+
+**Exemplo de uso:**
+```bash
+GET /api/v1/analytics/top-items?limit=20
+Authorization: Bearer <token>
+```
+
+#### GET `/api/v1/analytics/compare-store`
+
+Compara preços de um produto em diferentes supermercados.
+
+**Query Parameters:**
+- `product_id`: ID do produto (UUID)
+
+**Response:**
+```json
+{
+  "product_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+  "product_name": "arroz tipo branco",
+  "preco_medio_por_supermercado": [
+    {
+      "store_name": "SUPERMERCADO A",
+      "avg_price": 24.50,
+      "min_price": 23.00,
+      "max_price": 26.00,
+      "purchase_count": 5
+    },
+    {
+      "store_name": "SUPERMERCADO B",
+      "avg_price": 25.80,
+      "min_price": 24.50,
+      "max_price": 27.00,
+      "purchase_count": 3
+    }
+  ],
+  "menor_preco_encontrado": 23.00,
+  "loja_menor_preco": "SUPERMERCADO A",
+  "total_comparacoes": 2
+}
+```
+
+**Exemplo de uso:**
+```bash
+GET /api/v1/analytics/compare-store?product_id=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11
+Authorization: Bearer <token>
+```
+
+### Cache
+
+Os resultados de `monthly-summary` são cacheados automaticamente por mês para melhor performance. O cache é armazenado na tabela `analytics_cache` e é atualizado quando novos dados são processados.
+
+### Otimizações
+
+- **Queries otimizadas**: Usa GROUP BY e agregações SQL nativas
+- **Índices**: Aproveita índices em `user_id`, `emitted_at`, `product_id`
+- **Cache**: Resultados mensais são cacheados para evitar recálculos
+- **Lazy loading**: Relacionamentos são carregados apenas quando necessário
+
 ## CI/CD (GitHub Actions)
 
 O projeto inclui workflow do GitHub Actions que executa:
