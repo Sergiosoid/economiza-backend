@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
+from fastapi.openapi.utils import get_openapi
 import logging
 import redis
 from slowapi.errors import RateLimitExceeded
@@ -23,6 +24,9 @@ limiter = Limiter(
     default_limits=[settings.RATE_LIMIT_PER_IP]
 )
 
+# Criar esquema de segurança
+security_scheme = HTTPBearer()
+
 app = FastAPI(
     title="Economiza API",
     description="API backend do Economiza",
@@ -30,9 +34,34 @@ app = FastAPI(
     debug=settings.DEBUG,
 )
 
-# Configurar security scheme para Swagger
-# HTTPBearer já é automaticamente exposto no OpenAPI quando usado nas dependências
-security = HTTPBearer()
+
+def custom_openapi():
+    """Customiza o schema OpenAPI para incluir o esquema de segurança HTTPBearer"""
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    
+    # Adicionar esquema de segurança HTTPBearer
+    openapi_schema["components"]["securitySchemes"] = {
+        "HTTPBearer": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Digite 'Bearer test' (incluindo a palavra Bearer) para autenticação em desenvolvimento"
+        }
+    }
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 # Adicionar limiter ao app
 app.state.limiter = limiter
