@@ -3,7 +3,7 @@ Router para endpoints de analytics
 """
 import logging
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from uuid import UUID
 from app.database import get_db
@@ -13,6 +13,7 @@ from app.services.analytics_service import (
     get_top_items,
     compare_store_prices
 )
+from app.middleware.rate_limit import check_rate_limit, get_rate_limit_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,6 +24,7 @@ router = APIRouter()
     dependencies=[Depends(get_current_user)]
 )
 async def monthly_summary(
+    request: Request,
     year: int = Query(..., description="Ano (ex: 2024)"),
     month: int = Query(..., ge=1, le=12, description="Mês (1-12)"),
     use_cache: bool = Query(True, description="Usar cache se disponível"),
@@ -39,7 +41,18 @@ async def monthly_summary(
     - Variação percentual vs mês anterior
     
     Os resultados são cacheados por mês para melhor performance.
+    
+    Rate limiting: 30 req/min por usuário.
     """
+    # Rate limiting: 30 requisições/min por usuário
+    rate_limit_key = get_rate_limit_key(request, user_id)
+    if not await check_rate_limit(rate_limit_key, limit=30, window_seconds=60, request=request):
+        logger.warning(f"Rate limit exceeded for user: {user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="rate limit exceeded"
+        )
+    
     try:
         result = get_monthly_summary(
             db=db,
@@ -64,6 +77,7 @@ async def monthly_summary(
     dependencies=[Depends(get_current_user)]
 )
 async def top_items(
+    request: Request,
     limit: int = Query(20, ge=1, le=100, description="Número máximo de itens"),
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user)
@@ -78,7 +92,18 @@ async def top_items(
     - Total gasto
     - Preço médio
     - Número de compras
+    
+    Rate limiting: 30 req/min por usuário.
     """
+    # Rate limiting: 30 requisições/min por usuário
+    rate_limit_key = get_rate_limit_key(request, user_id)
+    if not await check_rate_limit(rate_limit_key, limit=30, window_seconds=60, request=request):
+        logger.warning(f"Rate limit exceeded for user: {user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="rate limit exceeded"
+        )
+    
     try:
         items = get_top_items(
             db=db,
@@ -104,6 +129,7 @@ async def top_items(
     dependencies=[Depends(get_current_user)]
 )
 async def compare_store(
+    request: Request,
     product_id: UUID = Query(..., description="ID do produto"),
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user)
@@ -118,7 +144,18 @@ async def compare_store(
     - Estatísticas de compras por loja
     
     Útil para identificar onde comprar mais barato.
+    
+    Rate limiting: 30 req/min por usuário.
     """
+    # Rate limiting: 30 requisições/min por usuário
+    rate_limit_key = get_rate_limit_key(request, user_id)
+    if not await check_rate_limit(rate_limit_key, limit=30, window_seconds=60, request=request):
+        logger.warning(f"Rate limit exceeded for user: {user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="rate limit exceeded"
+        )
+    
     try:
         result = compare_store_prices(
             db=db,

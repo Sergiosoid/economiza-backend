@@ -8,7 +8,7 @@ import io
 import zipfile
 from datetime import datetime, timedelta
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -20,6 +20,7 @@ from app.models.receipt import Receipt
 from app.models.receipt_item import ReceiptItem
 from app.models.product import Product
 from app.utils.encryption import decrypt_sensitive_data
+from app.middleware.rate_limit import check_rate_limit, get_rate_limit_key
 from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ router = APIRouter()
     dependencies=[Depends(get_current_user)]
 )
 async def export_user_data(
+    request: Request,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user)
 ):
@@ -41,7 +43,18 @@ async def export_user_data(
     - receipt_items.csv: Itens de todas as notas
     
     Conforme LGPD, o usuário tem direito a exportar seus dados.
+    
+    Rate limiting: 5 req/min por usuário.
     """
+    # Rate limiting: 5 requisições/min por usuário
+    rate_limit_key = get_rate_limit_key(request, user_id)
+    if not await check_rate_limit(rate_limit_key, limit=5, window_seconds=60, request=request):
+        logger.warning(f"Rate limit exceeded for user: {user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="rate limit exceeded"
+        )
+    
     logger.info(f"Exporting data for user: {user_id}")
     
     # Buscar usuário
@@ -227,6 +240,7 @@ async def export_user_data(
     dependencies=[Depends(get_current_user)]
 )
 async def delete_user_account(
+    request: Request,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user)
 ):
@@ -238,7 +252,18 @@ async def delete_user_account(
     - Hard delete: após 30 dias, dados são permanentemente removidos (via task agendada)
     
     Retorna 204 No Content em caso de sucesso.
+    
+    Rate limiting: 5 req/min por usuário.
     """
+    # Rate limiting: 5 requisições/min por usuário
+    rate_limit_key = get_rate_limit_key(request, user_id)
+    if not await check_rate_limit(rate_limit_key, limit=5, window_seconds=60, request=request):
+        logger.warning(f"Rate limit exceeded for user: {user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="rate limit exceeded"
+        )
+    
     logger.info(f"Deleting account for user: {user_id}")
     
     # Buscar usuário
@@ -274,6 +299,7 @@ async def delete_user_account(
     dependencies=[Depends(get_current_user)]
 )
 async def give_consent(
+    request: Request,
     consent_terms: bool = True,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user)
@@ -284,6 +310,17 @@ async def give_consent(
     
     Args:
         consent_terms: Se o usuário aceita os termos (padrão: True)
+    
+    Rate limiting: 5 req/min por usuário.
+    """
+    # Rate limiting: 5 requisições/min por usuário
+    rate_limit_key = get_rate_limit_key(request, user_id)
+    if not await check_rate_limit(rate_limit_key, limit=5, window_seconds=60, request=request):
+        logger.warning(f"Rate limit exceeded for user: {user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="rate limit exceeded"
+        )
     """
     user = db.query(User).filter(
         and_(User.id == user_id, User.deleted_at.is_(None))

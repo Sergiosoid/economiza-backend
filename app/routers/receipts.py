@@ -125,33 +125,14 @@ async def scan_receipt(
     5. Parseia e salva (ou enfileira)
     6. Retorna receipt_id ou task_id
     """
-    # Rate limiting: 30 requisições/min por usuário
-    limiter = request.app.state.limiter
-    
-    # Aplicar rate limit por usuário (30 req/min)
-    # Usar key baseada no user_id para identificar usuário
-    def get_user_key():
-        return str(user_id)
-    
-    try:
-        # Verificar rate limit usando decorator dinâmico
-        # Criar função wrapper que será limitada
-        @limiter.limit(settings.RATE_LIMIT_PER_USER, key_func=get_user_key)
-        def _check_user_rate_limit():
-            return True
-        
-        # Executar verificação
-        _check_user_rate_limit()
-        
-    except RateLimitExceeded:
+    # Rate limiting: 10 requisições/min por usuário
+    rate_limit_key = get_rate_limit_key(request, user_id)
+    if not await check_rate_limit(rate_limit_key, limit=10, window_seconds=60, request=request):
         logger.warning(f"Rate limit exceeded for user: {user_id}")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Limite de requisições excedido. Você pode fazer até 30 escaneamentos por minuto. Tente novamente em alguns instantes."
+            detail="rate limit exceeded"
         )
-    except Exception as e:
-        # Se houver erro no rate limiting, logar mas não bloquear (fail open)
-        logger.warning(f"Rate limiting check failed: {e}, allowing request")
     
     logger.info("qr_received", extra={"user_id": str(user_id), "qr_length": len(scan_request.qr_text)})
     
