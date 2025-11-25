@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from uuid import UUID
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies.auth import get_current_user
 from app.services.ai_service import generate_savings_suggestions
 
 logger = logging.getLogger(__name__)

@@ -30,6 +30,31 @@ A API estará disponível em `http://localhost:8000`
 
 Documentação interativa: `http://localhost:8000/docs`
 
+## Autenticação
+
+### Para Testes Locais
+
+O backend aceita um token de teste para desenvolvimento:
+
+**Header:** `Authorization: Bearer test`
+
+Ou simplesmente: `Authorization: test`
+
+O sistema aceita variações:
+- `Authorization: Bearer test` (padrão)
+- `Authorization: bearer test` (case-insensitive)
+- `Authorization: test` (sem esquema Bearer)
+
+### Usando o Swagger (OpenAPI)
+
+1. Acesse `http://localhost:8000/docs`
+2. Clique no botão **"Authorize"** (canto superior direito)
+3. No campo de autenticação, digite: `Bearer test`
+4. Clique em **"Authorize"**
+5. Agora você pode testar todos os endpoints autenticados diretamente no Swagger
+
+**Nota:** Em produção, o token "test" será rejeitado. A validação JWT real será implementada no futuro.
+
 ## Configuração do Provider de Notas Fiscais
 
 O endpoint `/api/v1/receipts/scan` utiliza um provider externo para buscar dados de notas fiscais.
@@ -268,9 +293,10 @@ O sistema também suporta XML convertido para dict:
 Endpoint completo para escanear QR code de nota fiscal, consultar provider, parsear e salvar no banco.
 
 **Autenticação:**
-- Header: `Authorization: Bearer <token>`
-- Por enquanto, aceita qualquer token (stub para testes)
-- TODO: Implementar autenticação JWT real
+- Header: `Authorization: Bearer test` (para testes locais)
+- Também aceita: `Authorization: test` (sem Bearer)
+- Case-insensitive: `Authorization: bearer test` funciona
+- Em produção, tokens diferentes de "test" serão rejeitados até implementação JWT
 
 **Request:**
 ```json

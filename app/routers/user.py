@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from uuid import UUID
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.models.receipt import Receipt
 from app.models.receipt_item import ReceiptItem

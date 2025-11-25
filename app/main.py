@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer
 import logging
 import redis
 from slowapi.errors import RateLimitExceeded
@@ -28,6 +29,10 @@ app = FastAPI(
     version="1.0.0",
     debug=settings.DEBUG,
 )
+
+# Configurar security scheme para Swagger
+# HTTPBearer já é automaticamente exposto no OpenAPI quando usado nas dependências
+security = HTTPBearer()
 
 # Adicionar limiter ao app
 app.state.limiter = limiter

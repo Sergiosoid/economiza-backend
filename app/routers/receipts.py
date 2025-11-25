@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from uuid import UUID
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies.auth import get_current_user
 from app.utils.qr_extractor import extract_key_or_url
 from app.services.provider_client import fetch_by_url, fetch_by_key, ProviderError
 from app.services.receipt_parser import parse_note
