@@ -6,6 +6,11 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
     
+    # Security
+    SECRET_KEY: str = "change_this_later"
+    ALGORITHM: str = "HS256"
+    ENVIRONMENT: str = "development"
+    
     # API
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = True
@@ -15,9 +20,9 @@ class Settings(BaseSettings):
     
     # Provider API (Webmania/Serpro/Oobj)
     PROVIDER_NAME: str = "webmania"  # webmania | oobj | serpro
-    PROVIDER_API_URL: str = ""
-    PROVIDER_APP_KEY: str = ""
-    PROVIDER_APP_SECRET: str = ""
+    PROVIDER_API_URL: Optional[str] = None
+    PROVIDER_APP_KEY: Optional[str] = None
+    PROVIDER_APP_SECRET: Optional[str] = None
     PROVIDER_TIMEOUT: int = 10
     WHITELIST_DOMAINS: str = ""  # Domínios permitidos separados por vírgula
     
@@ -50,6 +55,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="ignore",
         case_sensitive=True,
     )
 
