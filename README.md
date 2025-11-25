@@ -40,9 +40,11 @@ Configure as seguintes variáveis no `.env`:
 
 ```env
 PROVIDER_NAME=webmania  # webmania | oobj | serpro
-PROVIDER_API_URL=https://api.webmania.com.br/nfe
-PROVIDER_API_KEY=<sua_key_aqui>
-PROVIDER_TIMEOUT=8
+PROVIDER_API_URL=https://api.webmania.com.br/2/nfce/consulta
+PROVIDER_APP_KEY=<sua_app_key_aqui>
+PROVIDER_APP_SECRET=<sua_app_secret_aqui>
+PROVIDER_TIMEOUT=10
+WHITELIST_DOMAINS=  # Domínios adicionais permitidos (separados por vírgula)
 ```
 
 ### Providers Suportados
@@ -58,34 +60,84 @@ O sistema suporta os seguintes providers:
 
 1. Acesse: https://webmania.com.br
 2. Crie uma conta ou faça login
-3. Vá em **Dashboard** → **API** → **Chaves de API**
-4. Gere uma nova chave de API
-5. Copie a chave e cole no `.env`:
+3. Vá em **Dashboard** → **API** → **Credenciais**
+4. Gere suas credenciais de API (App Key e App Secret)
+5. Copie as credenciais e cole no `.env`:
    ```env
    PROVIDER_NAME=webmania
-   PROVIDER_API_URL=https://api.webmania.com.br/nfe
-   PROVIDER_API_KEY=sua-chave-aqui
+   PROVIDER_API_URL=https://api.webmania.com.br/2/nfce/consulta
+   PROVIDER_APP_KEY=sua-app-key-aqui
+   PROVIDER_APP_SECRET=sua-app-secret-aqui
+   PROVIDER_TIMEOUT=10
    ```
 
-**Endpoint:** `GET /nfe/{chave}`  
-**Header:** `Authorization: Bearer {API_KEY}`
+**Endpoint:** `GET /2/nfce/consulta/{chave}`  
+**Headers:**
+- `app_key: {PROVIDER_APP_KEY}`
+- `app_secret: {PROVIDER_APP_SECRET}`
+
+**Formato de Resposta:**
+```json
+{
+  "retorno": {
+    "chave": "35200112345678901234567890123456789012345678",
+    "data_emissao": "2024-04-12T15:33:00-03:00",
+    "emitente": {
+      "razao_social": "SUPERMERCADO EXEMPLO LTDA",
+      "cnpj": "12345678000100"
+    },
+    "produto": [
+      {
+        "descricao": "ARROZ TIPO 1 5KG",
+        "quantidade": "1.000",
+        "valor_unitario": "25.50",
+        "valor_total": "25.50",
+        "valor_imposto": "1.20"
+      }
+    ],
+    "total": "125.30"
+  }
+}
+```
+
+**Como Testar com Chave Real:**
+
+1. Obtenha uma chave de acesso real de uma NFC-e (44 dígitos)
+2. Configure as credenciais no `.env`
+3. Teste via API:
+   ```bash
+   curl -X POST http://localhost:8000/api/v1/receipts/scan \
+     -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{"qr_text": "35200112345678901234567890123456789012345678"}'
+   ```
+4. Ou teste diretamente o provider:
+   ```python
+   from app.services.provider_client import ProviderClient
+   client = ProviderClient()
+   result = client.fetch_by_key("35200112345678901234567890123456789012345678")
+   ```
 
 #### Oobj
 
 1. Acesse: https://oobj.com.br
 2. Crie uma conta ou faça login
-3. Vá em **Configurações** → **API** → **Tokens**
-4. Gere um novo token de API
-5. Copie o token e cole no `.env`:
+3. Vá em **Configurações** → **API** → **Credenciais**
+4. Gere suas credenciais (App Key e App Secret)
+5. Copie as credenciais e cole no `.env`:
    ```env
    PROVIDER_NAME=oobj
-   PROVIDER_API_URL=https://api.oobj.com.br
-   PROVIDER_API_KEY=seu-token-aqui
+   PROVIDER_API_URL=https://api.oobj.com.br/2/nfce/consulta
+   PROVIDER_APP_KEY=sua-app-key-aqui
+   PROVIDER_APP_SECRET=sua-app-secret-aqui
    ```
 
-**Endpoint:** `POST /consulta`  
-**Header:** `Authorization-Token: {TOKEN}`  
-**Body:** `{"chave": "44_digitos"}`
+**Endpoint:** `GET /2/nfce/consulta/{chave}`  
+**Headers:**
+- `app_key: {PROVIDER_APP_KEY}`
+- `app_secret: {PROVIDER_APP_SECRET}`
+
+**Formato de Resposta:** Mesmo formato do Webmania
 
 #### Serpro
 
@@ -120,16 +172,50 @@ O sistema implementa:
 
 - **Retries exponenciais**: Até 3 tentativas com backoff exponencial (1s, 2s, 4s)
 - **Tratamento de erros específicos**:
+  - `401/403` → `ProviderUnauthorized` (erro de autenticação)
   - `404` → `ProviderNotFound` (nota não encontrada)
   - `429` → `ProviderRateLimit` (rate limit excedido)
   - `5xx` → `ProviderError` (erro do servidor, com retries)
-- **Timeout configurável**: Padrão 8 segundos
+- **Timeout configurável**: Padrão 10 segundos
+- **Validação de chave**: Verifica se chave tem 44 dígitos
+- **Processamento de erros do provider**: Detecta campo "erro" nas respostas JSON
 
-### Exemplo de Resposta Esperada do Provider
+### Formato de Resposta do Provider
 
-O provider deve retornar dados em formato XML ou JSON. Exemplo de estrutura esperada:
+O sistema suporta dois formatos principais:
 
-**XML (convertido para dict):**
+#### 1. Formato Webmania/Oobj (JSON)
+
+```json
+{
+  "retorno": {
+    "chave": "35200112345678901234567890123456789012345678",
+    "data_emissao": "2024-04-12T15:33:00-03:00",
+    "emitente": {
+      "razao_social": "SUPERMERCADO EXEMPLO LTDA",
+      "cnpj": "12345678000100"
+    },
+    "produto": [
+      {
+        "descricao": "ARROZ TIPO 1 5KG",
+        "quantidade": "1.000",
+        "valor_unitario": "25.50",
+        "valor_total": "25.50",
+        "valor_imposto": "1.20",
+        "codigo_barras": "7891234567890"
+      }
+    ],
+    "total": "125.30",
+    "subtotal": "119.00",
+    "total_impostos": "6.30"
+  }
+}
+```
+
+#### 2. Formato XML (NFe/NFC-e padrão)
+
+O sistema também suporta XML convertido para dict:
+
 ```xml
 <nfeProc>
   <NFe>

@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 def parse_note(raw: Dict[str, Any]) -> Dict[str, Any]:
     """
     Parseia uma nota fiscal (XML ou JSON) e extrai os dados principais.
+    Suporta formatos: Webmania/Oobj (retorno.produto), XML NFe/NFC-e, JSON fake.
     
     Args:
         raw: Dados brutos da nota (dict)
@@ -34,8 +35,12 @@ def parse_note(raw: Dict[str, Any]) -> Dict[str, Any]:
         ValueError: Se houver erro ao parsear ou validar os dados
     """
     # Verificar se é formato JSON fake (desenvolvimento)
-    if "store" in raw and "total" in raw:
+    if "store" in raw and "total" in raw and "items" in raw:
         return _parse_fake_format(raw)
+    
+    # Verificar se é formato Webmania/Oobj (retorno.produto)
+    if "retorno" in raw:
+        return _parse_provider_format(raw)
     
     # Normalizar estrutura XML (pode vir em diferentes formatos)
     note_data = _normalize_structure(raw)
@@ -60,6 +65,133 @@ def parse_note(raw: Dict[str, Any]) -> Dict[str, Any]:
         "access_key": access_key,
         "emitted_at": emitted_at,
         "store_name": store_name or "Loja não identificada",
+        "store_cnpj": store_cnpj,
+        "subtotal": subtotal,
+        "total_value": total_value,
+        "total_tax": total_tax,
+        "items": items,
+    }
+
+
+def _safe_decimal(value: Any) -> Decimal:
+    """
+    Converte valor para Decimal com segurança.
+    """
+    try:
+        if value is None:
+            return Decimal("0")
+        if isinstance(value, Decimal):
+            return value
+        if isinstance(value, (int, float)):
+            return Decimal(str(value))
+        # Remover caracteres não numéricos exceto ponto e vírgula
+        str_value = str(value).strip()
+        str_value = str_value.replace(",", ".")
+        # Remover tudo exceto números e ponto
+        str_value = re.sub(r'[^\d.]', '', str_value)
+        if not str_value:
+            return Decimal("0")
+        return Decimal(str_value)
+    except Exception as e:
+        logger.warning(f"Erro ao converter para Decimal: {value}, erro: {e}")
+        return Decimal("0")
+
+
+def _parse_provider_format(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Parseia formato real do Webmania/Oobj:
+    {
+        "retorno": {
+            "produto": [...],
+            "emitente": {...},
+            "chave": "...",
+            "data_emissao": "..."
+        }
+    }
+    """
+    retorno = raw.get("retorno", {})
+    
+    if not retorno:
+        raise ValueError("Formato de resposta do provider inválido: campo 'retorno' não encontrado")
+    
+    # Extrair chave de acesso
+    access_key = retorno.get("chave") or retorno.get("chave_acesso") or ""
+    if not access_key or len(str(access_key)) != 44:
+        raise ValueError("Chave de acesso inválida ou não encontrada")
+    
+    # Extrair emitente
+    emitente = retorno.get("emitente", {})
+    store_name = emitente.get("razao_social") or emitente.get("nome") or "Loja não identificada"
+    store_cnpj = emitente.get("cnpj") or emitente.get("CNPJ") or ""
+    
+    # Extrair data de emissão
+    data_emissao_str = retorno.get("data_emissao") or retorno.get("dataEmissao") or retorno.get("dhEmi") or ""
+    try:
+        if data_emissao_str:
+            if "T" in data_emissao_str:
+                emitted_at = datetime.fromisoformat(data_emissao_str.replace("Z", "+00:00"))
+            elif "/" in data_emissao_str:
+                emitted_at = datetime.strptime(data_emissao_str, "%d/%m/%Y %H:%M:%S")
+            else:
+                emitted_at = datetime.fromisoformat(data_emissao_str)
+        else:
+            emitted_at = datetime.now()
+    except Exception:
+        emitted_at = datetime.now()
+    
+    # Extrair produtos
+    produtos = retorno.get("produto", [])
+    if not isinstance(produtos, list):
+        produtos = [produtos] if produtos else []
+    
+    items = []
+    subtotal = Decimal("0")
+    total_tax = Decimal("0")
+    
+    for produto in produtos:
+        try:
+            descricao = str(produto.get("descricao") or produto.get("desc") or "Produto não identificado")
+            
+            # Converter valores para Decimal com segurança
+            quantidade = _safe_decimal(produto.get("quantidade") or produto.get("qtd") or "1")
+            valor_unitario = _safe_decimal(produto.get("valor_unitario") or produto.get("preco_unitario") or "0")
+            valor_total = _safe_decimal(produto.get("valor_total") or produto.get("preco_total") or "0")
+            valor_imposto = _safe_decimal(produto.get("valor_imposto") or produto.get("imposto") or "0")
+            
+            # Se valor_total não estiver presente, calcular
+            if valor_total == 0 and quantidade > 0 and valor_unitario > 0:
+                valor_total = quantidade * valor_unitario
+            
+            items.append({
+                "description": descricao,
+                "quantity": quantidade,
+                "unit_price": valor_unitario,
+                "total_price": valor_total,
+                "tax_value": valor_imposto,
+                "barcode": produto.get("codigo_barras") or produto.get("ean") or None
+            })
+            
+            subtotal += valor_total
+            total_tax += valor_imposto
+            
+        except Exception as e:
+            logger.warning(f"Erro ao processar produto: {e}")
+            continue
+    
+    if not items:
+        raise ValueError("Nenhum produto encontrado na nota")
+    
+    # Calcular totais
+    total_value = subtotal + total_tax
+    
+    # Se houver totais no retorno, usar eles
+    if "total" in retorno:
+        total_value = _safe_decimal(retorno.get("total") or retorno.get("valor_total") or total_value)
+    
+    return {
+        "access_key": str(access_key),
+        "emitted_at": emitted_at,
+        "store_name": store_name,
         "store_cnpj": store_cnpj,
         "subtotal": subtotal,
         "total_value": total_value,

@@ -16,8 +16,10 @@ class Settings(BaseSettings):
     # Provider API (Webmania/Serpro/Oobj)
     PROVIDER_NAME: str = "webmania"  # webmania | oobj | serpro
     PROVIDER_API_URL: str = ""
-    PROVIDER_API_KEY: str = ""
-    PROVIDER_TIMEOUT: int = 8
+    PROVIDER_APP_KEY: str = ""
+    PROVIDER_APP_SECRET: str = ""
+    PROVIDER_TIMEOUT: int = 10
+    WHITELIST_DOMAINS: str = ""  # Domínios permitidos separados por vírgula
     
     # Vector DB (Supabase) - Opcional
     SUPABASE_URL: str = ""
