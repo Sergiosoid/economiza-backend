@@ -17,6 +17,7 @@ from app.services.receipt_service import (
     check_receipt_exists,
     save_receipt
 )
+from app.models.receipt import Receipt
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi import Limiter
@@ -282,4 +283,137 @@ async def scan_receipt(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erro interno do servidor"
+        )
+
+
+@router.get(
+    "/receipts/list",
+    dependencies=[Depends(get_current_user)],
+    responses={
+        200: {"description": "Lista de receipts do usuário"},
+    }
+)
+async def list_receipts(
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user),
+    limit: int = 50,
+    offset: int = 0
+):
+    """
+    Lista todas as notas fiscais do usuário.
+    
+    Args:
+        limit: Número máximo de resultados (padrão: 50)
+        offset: Número de resultados para pular (padrão: 0)
+        
+    Returns:
+        Lista de receipts ordenados por data de criação (mais recentes primeiro)
+    """
+    try:
+        receipts = db.query(Receipt).filter(
+            Receipt.user_id == user_id
+        ).order_by(
+            Receipt.created_at.desc()
+        ).limit(limit).offset(offset).all()
+        
+        receipts_data = []
+        for receipt in receipts:
+            receipts_data.append({
+                "id": str(receipt.id),
+                "store_name": receipt.store_name,
+                "store_cnpj": receipt.store_cnpj,
+                "total_value": float(receipt.total_value),
+                "total_tax": float(receipt.total_tax),
+                "emitted_at": receipt.emitted_at.isoformat() if receipt.emitted_at else None,
+                "created_at": receipt.created_at.isoformat() if receipt.created_at else None,
+            })
+        
+        return {
+            "receipts": receipts_data,
+            "total": len(receipts_data),
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        logger.error(f"Erro ao listar receipts: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao listar notas fiscais"
+        )
+
+
+@router.get(
+    "/receipts/{receipt_id}",
+    dependencies=[Depends(get_current_user)],
+    responses={
+        200: {"description": "Detalhes do receipt"},
+        404: {"description": "Receipt não encontrado"},
+    }
+)
+async def get_receipt(
+    receipt_id: UUID,
+    db: Session = Depends(get_db),
+    user_id: UUID = Depends(get_current_user)
+):
+    """
+    Busca detalhes de uma nota fiscal específica.
+    
+    Args:
+        receipt_id: ID da nota fiscal
+        
+    Returns:
+        Detalhes completos da nota fiscal incluindo itens
+    """
+    try:
+        receipt = db.query(Receipt).filter(
+            Receipt.id == receipt_id,
+            Receipt.user_id == user_id
+        ).first()
+        
+        if not receipt:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Receipt não encontrado"
+            )
+        
+        # Buscar itens do receipt
+        from app.models.receipt_item import ReceiptItem
+        items = db.query(ReceiptItem).filter(
+            ReceiptItem.receipt_id == receipt.id
+        ).all()
+        
+        items_data = []
+        for item in items:
+            items_data.append({
+                "id": str(item.id),
+                "receipt_id": str(item.receipt_id),
+                "product_id": str(item.product_id) if item.product_id else None,
+                "description": item.description,
+                "quantity": float(item.quantity),
+                "unit_price": float(item.unit_price),
+                "total_price": float(item.total_price),
+                "tax_value": float(item.tax_value),
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+            })
+        
+        return {
+            "id": str(receipt.id),
+            "user_id": str(receipt.user_id),
+            "access_key": receipt.access_key,
+            "total_value": float(receipt.total_value),
+            "subtotal": float(receipt.subtotal),
+            "total_tax": float(receipt.total_tax),
+            "emitted_at": receipt.emitted_at.isoformat() if receipt.emitted_at else None,
+            "store_name": receipt.store_name,
+            "store_cnpj": receipt.store_cnpj,
+            "created_at": receipt.created_at.isoformat() if receipt.created_at else None,
+            "items": items_data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao buscar receipt: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao buscar nota fiscal"
         )
