@@ -383,6 +383,149 @@ Use cartões de teste do Stripe:
 - CVC: qualquer 3 dígitos
 - CEP: qualquer CEP válido
 
+## Docker
+
+### Desenvolvimento com Docker Compose
+
+1. **Inicie os serviços:**
+```bash
+docker-compose up -d
+```
+
+2. **Execute as migrações:**
+```bash
+docker-compose exec web alembic upgrade head
+```
+
+3. **Acesse a API:**
+- API: http://localhost:8000
+- Docs: http://localhost:8000/docs
+- PostgreSQL: localhost:5432
+- Redis: localhost:6379
+
+4. **Parar os serviços:**
+```bash
+docker-compose down
+```
+
+5. **Ver logs:**
+```bash
+docker-compose logs -f web
+```
+
+### Build da imagem Docker
+
+```bash
+docker build -t economiza-backend .
+docker run -p 8000:8000 --env-file .env economiza-backend
+```
+
+## Deploy no Render
+
+### Pré-requisitos
+
+1. Conta no [Render](https://render.com)
+2. Repositório no GitHub
+3. Banco de dados PostgreSQL (pode ser criado no Render)
+
+### Passo a Passo
+
+1. **Criar Web Service:**
+   - Acesse: https://dashboard.render.com
+   - Clique em "New" → "Web Service"
+   - Conecte seu repositório GitHub
+   - Configure:
+     - **Name:** `economiza-backend`
+     - **Environment:** `Docker`
+     - **Region:** Escolha a região mais próxima
+     - **Branch:** `main`
+     - **Root Directory:** `economiza-backend` (se o backend estiver em subdiretório)
+
+2. **Configurar Variáveis de Ambiente:**
+   - Vá em "Environment" no dashboard do serviço
+   - Adicione todas as variáveis do `.env.example`:
+     ```
+     DATABASE_URL=postgresql://user:password@host:5432/dbname
+     REDIS_URL=redis://host:6379/0
+     CELERY_BROKER_URL=redis://host:6379/0
+     CELERY_RESULT_BACKEND=redis://host:6379/0
+     STRIPE_SECRET_KEY=sk_live_...
+     STRIPE_PUBLISHABLE_KEY=pk_live_...
+     STRIPE_WEBHOOK_SECRET=whsec_...
+     STRIPE_PRICE_ID_PRO=price_...
+     FRONTEND_URL=https://seu-frontend.com
+     ENCRYPTION_KEY=...
+     PROVIDER_NAME=webmania
+     PROVIDER_API_URL=...
+     PROVIDER_API_KEY=...
+     ```
+
+3. **Criar PostgreSQL Database:**
+   - Clique em "New" → "PostgreSQL"
+   - Configure nome e região
+   - Copie a `DATABASE_URL` interna (Render fornece automaticamente)
+   - Use essa URL nas variáveis de ambiente do Web Service
+
+4. **Criar Redis Instance (opcional, se não usar Redis do Render):**
+   - Clique em "New" → "Redis"
+   - Configure nome e região
+   - Copie a URL e use nas variáveis de ambiente
+
+5. **Configurar Build Command:**
+   - No Web Service, vá em "Settings" → "Build Command"
+   - Deixe vazio (Docker build automático) ou:
+     ```bash
+     docker build -t economiza-backend .
+     ```
+
+6. **Configurar Start Command:**
+   - No Web Service, vá em "Settings" → "Start Command"
+   - Use:
+     ```bash
+     sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+     ```
+   - **Nota:** Render define `$PORT` automaticamente
+
+7. **Deploy:**
+   - Render fará deploy automático a cada push em `main`
+   - Ou clique em "Manual Deploy" → "Deploy latest commit"
+
+### Configurar Celery Worker (Opcional)
+
+1. **Criar Background Worker:**
+   - Clique em "New" → "Background Worker"
+   - Conecte o mesmo repositório
+   - Configure:
+     - **Name:** `economiza-celery`
+     - **Environment:** `Docker`
+     - **Root Directory:** `economiza-backend`
+
+2. **Start Command:**
+   ```bash
+   celery -A celery_worker worker --loglevel=info
+   ```
+
+3. **Variáveis de Ambiente:**
+   - Use as mesmas do Web Service
+
+### Health Checks
+
+Render verifica automaticamente o endpoint `/health`:
+- Certifique-se de que está funcionando
+- Configure timeout adequado (padrão: 30s)
+
+### Custom Domain
+
+1. Vá em "Settings" → "Custom Domains"
+2. Adicione seu domínio
+3. Configure DNS conforme instruções do Render
+
+### Monitoramento
+
+- **Logs:** Acesse "Logs" no dashboard
+- **Metrics:** Render fornece métricas básicas
+- **Alerts:** Configure alertas para downtime
+
 ## Testes
 
 Execute os testes com:
@@ -399,6 +542,32 @@ Para executar os testes de pagamento:
 ```bash
 pytest tests/test_payments.py -v
 ```
+
+### Testes com Docker
+
+```bash
+docker-compose exec web pytest tests/ -v
+```
+
+## CI/CD (GitHub Actions)
+
+O projeto inclui workflow do GitHub Actions que executa:
+
+1. **Testes:** Executa pytest em cada push/PR
+2. **Lint:** Verifica código com flake8
+3. **Build:** Constrói imagem Docker e publica no GitHub Container Registry
+
+### Workflow
+
+O workflow está em `.github/workflows/ci.yml` e executa:
+- Testes com PostgreSQL e Redis como serviços
+- Lint com flake8
+- Build e push da imagem Docker (apenas em push para main)
+
+### Verificar Status
+
+- Acesse: `https://github.com/seu-usuario/economiza-backend/actions`
+- Veja o status de cada commit
 
 ## Estrutura do Projeto
 
