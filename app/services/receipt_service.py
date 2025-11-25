@@ -3,7 +3,6 @@ Service para gerenciar receipts (notas fiscais)
 """
 import logging
 import hashlib
-import re
 from typing import Optional
 from uuid import UUID
 from sqlalchemy.orm import Session
@@ -11,6 +10,7 @@ from app.models.receipt import Receipt
 from app.models.receipt_item import ReceiptItem
 from app.models.product import Product
 from app.utils.encryption import encrypt_sensitive_data
+from app.services.product_matcher import get_or_create_product_from_item
 
 logger = logging.getLogger(__name__)
 
@@ -22,59 +22,27 @@ def get_or_create_product(
     category_id: Optional[UUID] = None
 ) -> Product:
     """
-    Cria ou recupera um produto baseado na descrição normalizada.
+    Cria ou recupera um produto usando o product_matcher.
+    Mantém compatibilidade com a interface antiga.
     """
-    # Normalizar nome: lowercase, remover medidas comuns
-    normalized = _normalize_product_name(description)
+    item = {
+        "description": description,
+        "barcode": barcode,
+        "category_id": category_id
+    }
     
-    # Buscar por nome normalizado
-    product = db.query(Product).filter(
-        Product.normalized_name == normalized
-    ).first()
+    product_id = get_or_create_product_from_item(db, item)
     
-    if product:
-        # Atualizar barcode se fornecido e não existir
-        if barcode and not product.barcode:
-            product.barcode = barcode
-            db.commit()
-        return product
+    # Buscar produto criado/encontrado
+    product = db.query(Product).filter(Product.id == product_id).first()
     
-    # Criar novo produto
-    product = Product(
-        normalized_name=normalized,
-        barcode=barcode,
-        category_id=category_id
-    )
-    db.add(product)
-    db.commit()
-    db.refresh(product)
+    # Atualizar barcode se fornecido e não existir
+    if barcode and product and not product.barcode:
+        product.barcode = barcode
+        db.commit()
+        db.refresh(product)
     
     return product
-
-
-def _normalize_product_name(name: str) -> str:
-    """
-    Normaliza o nome do produto para busca:
-    - lowercase
-    - remove acentos
-    - remove medidas (kg, g, ml, l, etc)
-    """
-    import unicodedata
-    
-    # Lowercase
-    normalized = name.lower().strip()
-    
-    # Remover acentos
-    normalized = unicodedata.normalize('NFD', normalized)
-    normalized = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
-    
-    # Remover medidas comuns (kg, g, ml, l, un, pct, pac, cx)
-    normalized = re.sub(r'\d+\s*(kg|g|ml|l|un|pct|pac|cx|lt|ml)', '', normalized, flags=re.IGNORECASE)
-    
-    # Remover espaços extras
-    normalized = ' '.join(normalized.split())
-    
-    return normalized
 
 
 def check_receipt_exists(

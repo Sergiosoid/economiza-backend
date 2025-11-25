@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     PROVIDER_API_KEY: str = ""
     PROVIDER_TIMEOUT: int = 8
     
+    # Vector DB (Supabase) - Opcional
+    SUPABASE_URL: str = ""
+    SUPABASE_KEY: str = ""
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
