@@ -273,6 +273,116 @@ Os campos `raw_qr_text` e `xml_raw` são criptografados antes de serem salvos no
 
 **TODO:** Implementar criptografia real usando KMS (AWS KMS, Azure Key Vault, etc.)
 
+## Integração com Stripe (Pagamentos)
+
+O sistema suporta assinaturas PRO através do Stripe Checkout.
+
+### Configuração
+
+1. Crie uma conta no [Stripe](https://stripe.com)
+2. Obtenha suas chaves de API (teste ou produção)
+3. Crie um produto e preço no Stripe Dashboard
+4. Configure o webhook no Stripe Dashboard
+
+### Variáveis de Ambiente
+
+Adicione ao `.env`:
+
+```env
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_PUBLISHABLE_KEY=pk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PRICE_ID_PRO=price_...
+FRONTEND_URL=http://localhost:3000
+```
+
+### Como Obter as Chaves
+
+1. **Secret Key e Publishable Key:**
+   - Acesse: https://dashboard.stripe.com/test/apikeys
+   - Copie a "Secret key" e "Publishable key"
+   - Use chaves de teste (`sk_test_` e `pk_test_`) para desenvolvimento
+
+2. **Price ID:**
+   - Crie um produto no Stripe Dashboard
+   - Adicione um preço (recurring para assinatura)
+   - Copie o Price ID (começa com `price_`)
+
+3. **Webhook Secret:**
+   - Acesse: https://dashboard.stripe.com/test/webhooks
+   - Clique em "Add endpoint"
+   - URL: `https://seu-dominio.com/api/v1/payments/webhook`
+   - Selecione eventos: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`
+   - Copie o "Signing secret" (começa com `whsec_`)
+
+### Endpoints
+
+#### POST `/api/v1/payments/create-checkout-session`
+Cria uma sessão de checkout do Stripe.
+
+**Query Parameters:**
+- `plan`: Plano a assinar (padrão: "pro")
+
+**Response:**
+```json
+{
+  "checkout_url": "https://checkout.stripe.com/...",
+  "session_id": "cs_test_..."
+}
+```
+
+#### POST `/api/v1/payments/webhook`
+Webhook do Stripe para processar eventos de assinatura.
+
+**Headers:**
+- `stripe-signature`: Assinatura do Stripe
+
+**Eventos processados:**
+- `checkout.session.completed`: Marca usuário como PRO
+- `customer.subscription.updated`: Atualiza status da assinatura
+- `customer.subscription.deleted`: Remove status PRO
+
+#### GET `/api/v1/payments/subscription-status`
+Retorna o status da assinatura do usuário.
+
+**Response:**
+```json
+{
+  "is_pro": true,
+  "subscription_id": "sub_...",
+  "plan": "pro"
+}
+```
+
+### Frontend (React Native)
+
+Exemplo de integração:
+
+```typescript
+// Criar sessão de checkout
+const response = await fetch(`${API_BASE}/api/v1/payments/create-checkout-session?plan=pro`, {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  }
+});
+
+const { checkout_url } = await response.json();
+
+// Abrir Stripe Checkout no navegador
+import { Linking } from 'react-native';
+await Linking.openURL(checkout_url);
+```
+
+### Modo de Teste
+
+Use cartões de teste do Stripe:
+- Cartão de sucesso: `4242 4242 4242 4242`
+- Data de validade: qualquer data futura
+- CVC: qualquer 3 dígitos
+- CEP: qualquer CEP válido
+
 ## Testes
 
 Execute os testes com:
@@ -283,6 +393,11 @@ pytest tests/
 Para executar apenas os testes de scan:
 ```bash
 pytest tests/test_scan.py -v
+```
+
+Para executar os testes de pagamento:
+```bash
+pytest tests/test_payments.py -v
 ```
 
 ## Estrutura do Projeto

@@ -19,4 +19,5 @@ redis==5.0.1
 fastapi-limiter==0.1.6
 slowapi==0.1.9
 cryptography==41.0.7
+stripe==7.0.0
 

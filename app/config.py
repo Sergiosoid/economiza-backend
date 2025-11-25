@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     # TODO: Migrate to KMS (AWS KMS, Azure Key Vault, etc.)
     ENCRYPTION_KEY: str = ""
     
+    # Stripe
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PRICE_ID_PRO: str = ""  # Price ID do plano PRO no Stripe
+    FRONTEND_URL: str = "http://localhost:3000"  # URL do frontend para redirects
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
