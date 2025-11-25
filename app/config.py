@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change_this_later"
     ALGORITHM: str = "HS256"
     ENVIRONMENT: str = "development"
+    DEV_MODE: bool = True  # Modo desenvolvimento (permite token "test")
+    
+    # JWT Interno
+    JWT_SECRET: str = ""  # Secret para JWT interno (se vazio, usa SECRET_KEY)
+    JWT_ALGORITHM: str = "HS256"  # Algoritmo para JWT interno
+    JWT_EXPIRES_MIN: int = 60  # Tempo de expiração do JWT interno em minutos
     
     # API
     API_V1_PREFIX: str = "/api/v1"
@@ -30,8 +36,13 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_KEY: str = ""
     
+    # Supabase Auth
+    SUPABASE_JWKS_URL: str = ""  # endpoint para pegar chaves públicas (/.well-known/jwks.json)
+    SUPABASE_AUDIENCE: str = ""  # Audience esperado no JWT
+    
     # Redis (para Celery e rate limiting)
     REDIS_URL: str = "redis://localhost:6379/0"
+    RATE_LIMIT_PREFIX: str = "economiza:"  # Prefixo para chaves Redis de rate limiting
     
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
