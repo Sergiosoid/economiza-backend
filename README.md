@@ -99,7 +99,7 @@ O provider deve retornar dados em formato XML ou JSON. Exemplo de estrutura espe
 
 ### POST `/api/v1/receipts/scan`
 
-Endpoint para escanear QR code de nota fiscal e salvar no banco.
+Endpoint completo para escanear QR code de nota fiscal, consultar provider, parsear e salvar no banco.
 
 **Autenticação:**
 - Header: `Authorization: Bearer <token>`
@@ -113,11 +113,80 @@ Endpoint para escanear QR code de nota fiscal e salvar no banco.
 }
 ```
 
+**Exemplo de chamada com curl:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/receipts/scan" \
+  -H "Authorization: Bearer test-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "qr_text": "35200112345678901234567890123456789012345678"
+  }'
+```
+
 **Responses:**
-- `200 OK`: Receipt salvo com sucesso
-- `400 Bad Request`: Erro de validação (QR inválido, etc)
-- `409 Conflict`: Receipt já existe (idempotência)
-- `500 Internal Error`: Erro ao processar
+
+**200 OK - Receipt salvo com sucesso:**
+```json
+{
+  "receipt_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "saved"
+}
+```
+
+**400 Bad Request - QR code inválido:**
+```json
+{
+  "detail": "invalid qr code"
+}
+```
+
+**409 Conflict - Receipt já existe:**
+```json
+{
+  "detail": "receipt already exists",
+  "receipt_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**500 Internal Server Error - Erro do provider:**
+```json
+{
+  "detail": "provider error"
+}
+```
+
+### Fluxo Completo
+
+1. **Recebe qr_text** do app
+2. **Extrai chave de acesso ou URL** usando regex
+3. **Consulta provider externo** (ou retorna stub fake se não configurado)
+4. **Parseia a nota** extraindo itens, loja, impostos, total
+5. **Salva no banco**:
+   - Cria/atualiza `receipts`
+   - Cria/atualiza `products` (normalizados)
+   - Cria `receipt_items`
+6. **Retorna receipt_id** para o app
+
+### Configurar Provider Real
+
+Para usar um provider real (Webmania/Serpro/Oobj), configure no `.env`:
+
+```env
+PROVIDER_API_URL=https://api.webmania.com.br/v1
+PROVIDER_API_KEY=sua-chave-api-aqui
+PROVIDER_TIMEOUT=5
+```
+
+**Sem provider configurado**, o sistema retorna dados fake para desenvolvimento:
+- Loja: "SUPERMERCADO EXEMPLO"
+- CNPJ: "12345678000100"
+- Itens de exemplo (Arroz, Feijão, Açúcar)
+
+**Com provider configurado**, o sistema:
+- Faz requisição HTTP para `PROVIDER_API_URL/nfe/{chave}`
+- Usa `PROVIDER_API_KEY` no header Authorization
+- Converte XML para dict se necessário
+- Faz retry (2x) com backoff em caso de timeout
 
 ## Criptografia de Dados Sensíveis
 

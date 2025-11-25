@@ -53,11 +53,23 @@ def get_or_create_product(
 
 
 def _normalize_product_name(name: str) -> str:
-    """Normaliza o nome do produto para busca"""
+    """
+    Normaliza o nome do produto para busca:
+    - lowercase
+    - remove acentos
+    - remove medidas (kg, g, ml, l, etc)
+    """
+    import unicodedata
+    
+    # Lowercase
     normalized = name.lower().strip()
     
-    # Remover medidas comuns (kg, g, ml, l, etc)
-    normalized = re.sub(r'\d+\s*(kg|g|ml|l|un|pct|pac|cx)', '', normalized, flags=re.IGNORECASE)
+    # Remover acentos
+    normalized = unicodedata.normalize('NFD', normalized)
+    normalized = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+    
+    # Remover medidas comuns (kg, g, ml, l, un, pct, pac, cx)
+    normalized = re.sub(r'\d+\s*(kg|g|ml|l|un|pct|pac|cx|lt|ml)', '', normalized, flags=re.IGNORECASE)
     
     # Remover espaços extras
     normalized = ' '.join(normalized.split())

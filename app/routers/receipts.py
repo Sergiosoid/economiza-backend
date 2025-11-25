@@ -1,19 +1,19 @@
 """
 Router para endpoints de receipts (notas fiscais)
 """
-import re
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from uuid import UUID
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.services.provider_client import fetch_note_by_url, fetch_note_by_key
+from app.utils.qr_extractor import extract_key_or_url
+from app.services.provider_client import fetch_by_url, fetch_by_key, ProviderError
 from app.services.receipt_parser import parse_note
 from app.services.receipt_service import (
     check_receipt_exists,
-    check_qr_text_exists,
     save_receipt
 )
 
@@ -39,21 +39,15 @@ class ScanReceiptResponse(BaseModel):
     status: str
 
 
-class ScanReceiptConflictResponse(BaseModel):
-    detail: str
-    receipt_id: UUID
-
-
 @router.post(
     "/receipts/scan",
     response_model=ScanReceiptResponse,
     status_code=status.HTTP_200_OK,
     responses={
         200: {"description": "Receipt salvo com sucesso"},
-        202: {"description": "Receipt em processamento"},
-        400: {"description": "Erro de validação"},
+        400: {"description": "QR code inválido"},
         409: {"description": "Receipt já existe"},
-        500: {"description": "Erro interno"},
+        500: {"description": "Erro do provider"},
     }
 )
 async def scan_receipt(
@@ -64,80 +58,52 @@ async def scan_receipt(
     """
     Endpoint para escanear QR code de nota fiscal e salvar no banco.
     
-    Fluxo:
-    1. Valida qr_text
-    2. Extrai URL ou chave de acesso
-    3. Verifica idempotência
-    4. Busca nota do provider
-    5. Parseia dados
-    6. Salva no banco
+    Fluxo completo:
+    1. Recebe qr_text
+    2. Extrai chave de acesso ou URL
+    3. Consulta a nota fiscal em um provedor externo
+    4. Parseia a nota (itens, loja, impostos, total)
+    5. Salva em receipts, products e receipt_items
+    6. Retorna receipt_id
     """
-    logger.info("scan_received", extra={"user_id": str(user_id), "qr_length": len(request.qr_text)})
+    logger.info("qr_received", extra={"user_id": str(user_id), "qr_length": len(request.qr_text)})
     
     try:
-        # 1. Validação e extração
-        url = None
-        access_key = None
-        
-        # Verificar se contém URL
-        url_pattern = r'https?://[^\s]+'
-        url_match = re.search(url_pattern, request.qr_text)
-        if url_match:
-            url = url_match.group(0)
-            logger.info(f"URL encontrada: {url[:50]}...")
-        else:
-            # Buscar chave de acesso (44 dígitos)
-            key_pattern = r'\d{44}'
-            key_match = re.search(key_pattern, request.qr_text)
-            if key_match:
-                access_key = key_match.group(0)
-                logger.info(f"Chave de acesso encontrada: {access_key[:10]}...")
-        
-        if not url and not access_key:
-            logger.warning("Nenhuma URL ou chave de acesso encontrada")
+        # 1. Extrair chave de acesso ou URL
+        try:
+            url, access_key = extract_key_or_url(request.qr_text)
+        except ValueError as e:
+            logger.warning(f"invalid_qr_code: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="QR text não contém URL válida nem chave de acesso (44 dígitos)"
+                detail="invalid qr code"
             )
         
-        # 2. Verificar idempotência
+        # 2. Verificar idempotência (se temos access_key)
         if access_key:
             existing_receipt = check_receipt_exists(db, user_id, access_key)
             if existing_receipt:
-                logger.info(f"Receipt já existe: {existing_receipt.id}")
-                from fastapi.responses import JSONResponse
+                logger.info(f"receipt_already_exists: {existing_receipt.id}")
                 return JSONResponse(
                     status_code=status.HTTP_409_CONFLICT,
                     content={
-                        "detail": "Receipt already exists",
+                        "detail": "receipt already exists",
                         "receipt_id": str(existing_receipt.id)
                     }
                 )
         
-        # Verificar por QR text hash
-        existing_by_qr = check_qr_text_exists(db, request.qr_text)
-        if existing_by_qr:
-            logger.info(f"QR text já processado: {existing_by_qr.id}")
-            from fastapi.responses import JSONResponse
-            return JSONResponse(
-                status_code=status.HTTP_409_CONFLICT,
-                content={
-                    "detail": "Receipt already exists",
-                    "receipt_id": str(existing_by_qr.id)
-                }
-            )
-        
-        # 3. Buscar nota do provider
+        # 3. Consultar provider
         try:
             if url:
-                raw_note = fetch_note_by_url(url)
+                raw_note = fetch_by_url(url)
             else:
-                raw_note = fetch_note_by_key(access_key)
-        except Exception as e:
-            logger.error(f"Erro ao buscar nota do provider: {e}")
+                raw_note = fetch_by_key(access_key)
+            logger.info("provider_fetch_ok")
+        except ProviderError as e:
+            logger.error(f"provider_fetch_fail: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao buscar nota fiscal: {str(e)}"
+                detail="provider error"
             )
         
         # 4. Parsear nota
@@ -146,11 +112,11 @@ async def scan_receipt(
             # Garantir que access_key está presente
             if not parsed_data.get("access_key") and access_key:
                 parsed_data["access_key"] = access_key
-        except Exception as e:
-            logger.error(f"parse_error: {e}")
+        except ValueError as e:
+            logger.error(f"parse_error: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Erro ao parsear nota fiscal: {str(e)}"
+                detail=f"invalid qr code: {str(e)}"
             )
         
         # 5. Salvar no banco
@@ -177,10 +143,10 @@ async def scan_receipt(
             )
             
         except Exception as e:
-            logger.error(f"Erro ao salvar receipt: {e}")
+            logger.error(f"Error saving receipt: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao salvar nota fiscal: {str(e)}"
+                detail="Erro ao salvar nota fiscal"
             )
             
     except HTTPException:
@@ -191,4 +157,3 @@ async def scan_receipt(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erro interno do servidor"
         )
-

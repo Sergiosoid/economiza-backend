@@ -5,16 +5,20 @@ import requests
 import xmltodict
 import logging
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def fetch_note_by_url(url: str) -> Dict[str, Any]:
+class ProviderError(Exception):
+    """Exceção para erros do provider"""
+    pass
+
+
+def fetch_by_url(url: str) -> Dict[str, Any]:
     """
     Busca nota fiscal por URL.
-    Faz request HTTP e tenta converter XML para dict se necessário.
     
     Args:
         url: URL da nota fiscal
@@ -23,14 +27,14 @@ def fetch_note_by_url(url: str) -> Dict[str, Any]:
         dict com os dados da nota
         
     Raises:
-        Exception: Se houver erro ao buscar ou processar a nota
+        ProviderError: Se houver erro ao buscar ou processar a nota
     """
     logger.info(f"Fetching note from URL: {url}")
     
     try:
         response = requests.get(
             url,
-            timeout=settings.PROVIDER_TIMEOUT,
+            timeout=5,
             headers={"User-Agent": "Economiza-Backend/1.0"}
         )
         response.raise_for_status()
@@ -39,9 +43,8 @@ def fetch_note_by_url(url: str) -> Dict[str, Any]:
         
         # Se for XML, converter para dict
         if "xml" in content_type or response.text.strip().startswith("<?xml"):
-            logger.info("Converting XML response to dict")
+            logger.info("provider_fetch_ok: URL (XML)")
             data = xmltodict.parse(response.text)
-            logger.info("provider_fetch_ok: URL")
             return data
         
         # Se for JSON, retornar parseado
@@ -60,15 +63,16 @@ def fetch_note_by_url(url: str) -> Dict[str, Any]:
             
     except requests.exceptions.Timeout:
         logger.error("provider_fetch_fail: Timeout")
-        raise Exception("Timeout ao buscar nota fiscal")
+        raise ProviderError("Timeout ao buscar nota fiscal")
     except requests.exceptions.RequestException as e:
         logger.error(f"provider_fetch_fail: {str(e)}")
-        raise Exception(f"Erro ao buscar nota fiscal: {str(e)}")
+        raise ProviderError(f"Erro ao buscar nota fiscal: {str(e)}")
 
 
-def fetch_note_by_key(key: str) -> Dict[str, Any]:
+def fetch_by_key(key: str) -> Dict[str, Any]:
     """
     Busca nota fiscal por chave de acesso usando API do provider.
+    Se não houver provider configurado, retorna JSON fake para desenvolvimento.
     
     Args:
         key: Chave de acesso da nota fiscal (44 dígitos)
@@ -77,10 +81,12 @@ def fetch_note_by_key(key: str) -> Dict[str, Any]:
         dict com os dados da nota
         
     Raises:
-        Exception: Se houver erro ao buscar a nota
+        ProviderError: Se houver erro ao buscar a nota
     """
+    # Se não houver provider configurado, retornar stub fake
     if not settings.PROVIDER_API_URL or not settings.PROVIDER_API_KEY:
-        raise Exception("PROVIDER_API_URL e PROVIDER_API_KEY devem estar configurados no .env")
+        logger.info("Provider não configurado, retornando dados fake para desenvolvimento")
+        return _get_fake_note(key)
     
     logger.info(f"Fetching note by key: {key[:10]}...")
     
@@ -95,7 +101,7 @@ def fetch_note_by_key(key: str) -> Dict[str, Any]:
                     "Authorization": f"Bearer {settings.PROVIDER_API_KEY}",
                     "Content-Type": "application/json"
                 },
-                timeout=settings.PROVIDER_TIMEOUT
+                timeout=5
             )
             response.raise_for_status()
             
@@ -103,9 +109,8 @@ def fetch_note_by_key(key: str) -> Dict[str, Any]:
             
             # Se for XML, converter para dict
             if "xml" in content_type or response.text.strip().startswith("<?xml"):
-                logger.info("Converting XML response to dict")
+                logger.info("provider_fetch_ok: Key (XML)")
                 data = xmltodict.parse(response.text)
-                logger.info("provider_fetch_ok: Key")
                 return data
             
             # Se for JSON, retornar parseado
@@ -119,7 +124,7 @@ def fetch_note_by_key(key: str) -> Dict[str, Any]:
                 backoff *= 2
                 continue
             logger.error("provider_fetch_fail: Timeout after retries")
-            raise Exception("Timeout ao buscar nota fiscal após tentativas")
+            raise ProviderError("Timeout ao buscar nota fiscal após tentativas")
             
         except requests.exceptions.RequestException as e:
             if attempt < max_retries:
@@ -128,7 +133,46 @@ def fetch_note_by_key(key: str) -> Dict[str, Any]:
                 backoff *= 2
                 continue
             logger.error(f"provider_fetch_fail: {str(e)}")
-            raise Exception(f"Erro ao buscar nota fiscal: {str(e)}")
+            raise ProviderError(f"Erro ao buscar nota fiscal: {str(e)}")
     
-    raise Exception("Erro ao buscar nota fiscal após todas as tentativas")
+    raise ProviderError("Erro ao buscar nota fiscal após todas as tentativas")
 
+
+def _get_fake_note(key: str) -> Dict[str, Any]:
+    """
+    Retorna uma nota fiscal fake para desenvolvimento.
+    """
+    return {
+        "access_key": key,
+        "store": {
+            "name": "SUPERMERCADO EXEMPLO",
+            "cnpj": "12345678000100"
+        },
+        "total": 125.30,
+        "subtotal": 119.00,
+        "tax": 6.30,
+        "items": [
+            {
+                "description": "ARROZ TIPO 1 5KG",
+                "quantity": 1,
+                "unit_price": 25.50,
+                "total_price": 25.50,
+                "tax_value": 1.20
+            },
+            {
+                "description": "FEIJAO PRETO 1KG",
+                "quantity": 2,
+                "unit_price": 8.50,
+                "total_price": 17.00,
+                "tax_value": 0.85
+            },
+            {
+                "description": "ACUCAR CRISTAL 1KG",
+                "quantity": 1,
+                "unit_price": 4.50,
+                "total_price": 4.50,
+                "tax_value": 0.25
+            }
+        ],
+        "emitted_at": "2024-04-12T15:33:00"
+    }

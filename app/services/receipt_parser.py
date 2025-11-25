@@ -5,17 +5,17 @@ import re
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
 
-def parse_note(raw: Dict[str, Any] | str) -> Dict[str, Any]:
+def parse_note(raw: Dict[str, Any]) -> Dict[str, Any]:
     """
     Parseia uma nota fiscal (XML ou JSON) e extrai os dados principais.
     
     Args:
-        raw: Dados brutos da nota (dict ou string XML)
+        raw: Dados brutos da nota (dict)
         
     Returns:
         dict com os dados parseados:
@@ -29,16 +29,15 @@ def parse_note(raw: Dict[str, Any] | str) -> Dict[str, Any]:
             "total_tax": Decimal,
             "items": List[Dict]
         }
+        
+    Raises:
+        ValueError: Se houver erro ao parsear ou validar os dados
     """
-    # Se for string, tentar parsear como XML
-    if isinstance(raw, str):
-        try:
-            import xmltodict
-            raw = xmltodict.parse(raw)
-        except:
-            raise ValueError("Não foi possível parsear o formato da nota")
+    # Verificar se é formato JSON fake (desenvolvimento)
+    if "store" in raw and "total" in raw:
+        return _parse_fake_format(raw)
     
-    # Normalizar estrutura (pode vir em diferentes formatos)
+    # Normalizar estrutura XML (pode vir em diferentes formatos)
     note_data = _normalize_structure(raw)
     
     # Extrair dados principais
@@ -49,15 +48,58 @@ def parse_note(raw: Dict[str, Any] | str) -> Dict[str, Any]:
     subtotal, total_value, total_tax = _extract_totals(note_data)
     items = _extract_items(note_data)
     
+    # Validação
+    if not access_key:
+        raise ValueError("Chave de acesso não encontrada")
+    if not emitted_at:
+        raise ValueError("Data de emissão não encontrada")
+    if not items:
+        raise ValueError("Nenhum item encontrado na nota")
+    
     return {
         "access_key": access_key,
         "emitted_at": emitted_at,
-        "store_name": store_name,
+        "store_name": store_name or "Loja não identificada",
         "store_cnpj": store_cnpj,
         "subtotal": subtotal,
         "total_value": total_value,
         "total_tax": total_tax,
         "items": items,
+    }
+
+
+def _parse_fake_format(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Parseia formato JSON fake usado em desenvolvimento"""
+    store = raw.get("store", {})
+    items = raw.get("items", [])
+    
+    # Converter items para formato padrão
+    parsed_items = []
+    for item in items:
+        parsed_items.append({
+            "description": str(item.get("description", "")),
+            "quantity": Decimal(str(item.get("quantity", 1))),
+            "unit_price": Decimal(str(item.get("unit_price", 0))),
+            "total_price": Decimal(str(item.get("total_price", 0))),
+            "tax_value": Decimal(str(item.get("tax_value", 0))),
+        })
+    
+    # Parsear data
+    emitted_at_str = raw.get("emitted_at", "")
+    try:
+        emitted_at = datetime.fromisoformat(emitted_at_str.replace("Z", "+00:00"))
+    except:
+        emitted_at = datetime.now()
+    
+    return {
+        "access_key": str(raw.get("access_key", "")),
+        "emitted_at": emitted_at,
+        "store_name": store.get("name", "Loja não identificada"),
+        "store_cnpj": store.get("cnpj"),
+        "subtotal": Decimal(str(raw.get("subtotal", 0))),
+        "total_value": Decimal(str(raw.get("total", 0))),
+        "total_tax": Decimal(str(raw.get("tax", 0))),
+        "items": parsed_items,
     }
 
 
@@ -77,7 +119,6 @@ def _normalize_structure(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _extract_access_key(data: Dict[str, Any]) -> str:
     """Extrai a chave de acesso da nota"""
-    # Tentar diferentes caminhos
     paths = [
         ["@Id"],
         ["infNFe", "@Id"],
@@ -89,13 +130,12 @@ def _extract_access_key(data: Dict[str, Any]) -> str:
     for path in paths:
         value = _get_nested_value(data, path)
         if value:
-            # Remover prefixo "NFe" se existir
             if isinstance(value, str) and value.startswith("NFe"):
                 value = value[3:]
-            if len(value) == 44:
-                return value
+            if len(str(value)) == 44:
+                return str(value)
     
-    raise ValueError("Chave de acesso não encontrada")
+    return ""
 
 
 def _extract_emitted_at(data: Dict[str, Any]) -> datetime:
@@ -111,20 +151,15 @@ def _extract_emitted_at(data: Dict[str, Any]) -> datetime:
         value = _get_nested_value(data, path)
         if value:
             try:
-                # Tentar diferentes formatos de data
                 if isinstance(value, str):
-                    # Formato ISO com timezone
                     if "T" in value:
                         return datetime.fromisoformat(value.replace("Z", "+00:00"))
-                    # Formato brasileiro
                     if "/" in value:
                         return datetime.strptime(value, "%d/%m/%Y")
                 return datetime.fromisoformat(str(value))
             except:
                 continue
     
-    # Se não encontrar, usar data atual
-    logger.warning("Data de emissão não encontrada, usando data atual")
     return datetime.now()
 
 
@@ -142,10 +177,10 @@ def _extract_store_name(data: Dict[str, Any]) -> str:
         if value:
             return str(value)
     
-    return "Loja não identificada"
+    return ""
 
 
-def _extract_store_cnpj(data: Dict[str, Any]) -> Optional[str]:
+def _extract_store_cnpj(data: Dict[str, Any]) -> str:
     """Extrai o CNPJ da loja"""
     paths = [
         ["emit", "CNPJ"],
@@ -209,7 +244,6 @@ def _extract_totals(data: Dict[str, Any]) -> tuple[Decimal, Decimal, Decimal]:
             total_tax = Decimal(str(value))
             break
     
-    # Se subtotal não foi encontrado, usar total_value
     if subtotal == 0:
         subtotal = total_value
     
@@ -220,7 +254,6 @@ def _extract_items(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extrai os itens da nota"""
     items = []
     
-    # Tentar diferentes caminhos para os itens
     det_paths = [
         ["det"],
         ["dets", "det"],
@@ -235,16 +268,13 @@ def _extract_items(data: Dict[str, Any]) -> List[Dict[str, Any]]:
             break
     
     if not det_list:
-        logger.warning("Nenhum item encontrado na nota")
         return items
     
-    # Normalizar para lista
     if not isinstance(det_list, list):
         det_list = [det_list]
     
     for det in det_list:
         try:
-            # Extrair dados do produto
             prod = det.get("prod", {}) if isinstance(det, dict) else {}
             
             description = (
@@ -258,31 +288,21 @@ def _extract_items(data: Dict[str, Any]) -> List[Dict[str, Any]]:
             unit_price = Decimal(str(prod.get("vUnCom", prod.get("precoUnitario", "0"))))
             total_price = Decimal(str(prod.get("vProd", prod.get("valorTotal", "0"))))
             
-            # Calcular impostos
             tax_value = Decimal("0")
             if isinstance(det, dict):
                 imp = det.get("imposto", {})
                 if imp:
-                    # IPI
                     ipi = imp.get("IPI", {})
                     if ipi:
                         ipi_tot = ipi.get("IPITrib", {}) or ipi.get("IPINT", {})
                         if ipi_tot:
                             tax_value += Decimal(str(ipi_tot.get("vIPI", "0")))
                     
-                    # ICMS
                     icms = imp.get("ICMS", {})
                     if isinstance(icms, dict):
                         icms_val = icms.get("vICMS", "0")
                         if icms_val:
                             tax_value += Decimal(str(icms_val))
-            
-            barcode = (
-                prod.get("cEAN") or
-                prod.get("cBarra") or
-                prod.get("barcode") or
-                None
-            )
             
             items.append({
                 "description": str(description),
@@ -290,7 +310,6 @@ def _extract_items(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "unit_price": unit_price,
                 "total_price": total_price,
                 "tax_value": tax_value,
-                "barcode": str(barcode) if barcode else None,
             })
         except Exception as e:
             logger.warning(f"Erro ao processar item: {e}")
@@ -310,4 +329,3 @@ def _get_nested_value(data: Dict[str, Any], path: List[str]) -> Any:
         if current is None:
             return None
     return current
-
