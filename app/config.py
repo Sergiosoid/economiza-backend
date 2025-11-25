@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     
     # Rate Limiting
     RATE_LIMIT_PER_IP: str = "30/minute"
-    RATE_LIMIT_PER_USER: str = "60/minute"
+    RATE_LIMIT_PER_USER: str = "30/minute"  # Limite para endpoint /scan
     
     # Encryption (Fernet key - 32 bytes base64 encoded)
     # TODO: Migrate to KMS (AWS KMS, Azure Key Vault, etc.)

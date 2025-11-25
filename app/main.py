@@ -132,3 +132,103 @@ async def health_live():
     """Liveness check - verifica se a aplicação está viva"""
     return {"status": "alive"}
 
+
+@app.get("/health/db")
+async def health_db():
+    """
+    Health check específico para banco de dados PostgreSQL.
+    Verifica conexão e executa query simples.
+    """
+    try:
+        from app.database import engine
+        from sqlalchemy import text
+        
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT 1 as health_check"))
+            row = result.fetchone()
+            
+            if row and row[0] == 1:
+                return {
+                    "status": "healthy",
+                    "service": "postgresql",
+                    "message": "Database connection successful"
+                }
+            else:
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "status": "unhealthy",
+                        "service": "postgresql",
+                        "message": "Database query failed"
+                    }
+                )
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "service": "postgresql",
+                "error": str(e)
+            }
+        )
+
+
+@app.get("/health/provider")
+async def health_provider():
+    """
+    Health check para provider de notas fiscais.
+    Testa conectividade com provider usando chave fake ou ping.
+    """
+    try:
+        from app.services.provider_client import ProviderClient
+        from app.config import settings
+        
+        # Verificar se provider está configurado
+        if not settings.PROVIDER_API_URL or not settings.PROVIDER_APP_KEY:
+            return {
+                "status": "not_configured",
+                "service": "provider",
+                "message": "Provider not configured (using fake data for development)"
+            }
+        
+        # Tentar criar cliente (valida configuração)
+        try:
+            client = ProviderClient()
+            
+            # Verificar se tem credenciais
+            if not client.app_key or not client.app_secret:
+                return {
+                    "status": "not_configured",
+                    "service": "provider",
+                    "message": "Provider credentials not set"
+                }
+            
+            # Se provider estiver configurado, considerar healthy
+            # (não fazer request real para não consumir quota)
+            return {
+                "status": "healthy",
+                "service": "provider",
+                "provider_name": settings.PROVIDER_NAME,
+                "message": "Provider configured and ready"
+            }
+            
+        except Exception as e:
+            logger.warning(f"Provider health check warning: {e}")
+            return {
+                "status": "degraded",
+                "service": "provider",
+                "error": str(e)
+            }
+            
+    except Exception as e:
+        logger.error(f"Provider health check failed: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "service": "provider",
+                "error": str(e)
+            }
+        )
+

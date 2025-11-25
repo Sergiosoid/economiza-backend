@@ -19,6 +19,9 @@ ALLOWED_HOSTS = [
     "nfe.fazenda.gov.br",
     "www.fazenda.gov.br",
     "nfce.fazenda.gov.br",
+    "sefaz.sp.gov.br",
+    "sefaz.rs.gov.br",
+    "sefaz.mg.gov.br",
 ]
 
 
@@ -45,16 +48,27 @@ class ProviderUnauthorized(ProviderError):
 def _is_allowed_host(host: str) -> bool:
     """
     Verifica se o host está na lista de permitidos (anti-SSRF).
-    Suporta wildcards como *.fazenda.gov.br e whitelist customizada.
+    Rejeita URLs fora dos domínios permitidos.
+    Suporta wildcards e whitelist customizada.
     """
+    if not host:
+        return False
+    
+    # Normalizar host (remover porta se houver)
+    host = host.split(":")[0].lower().strip()
+    
     # Verificar hosts padrão
     for allowed in ALLOWED_HOSTS:
-        if host == allowed or host.endswith(f".{allowed}"):
+        allowed_lower = allowed.lower()
+        if host == allowed_lower:
+            return True
+        # Verificar subdomínios (ex: nfe.fazenda.gov.br)
+        if host.endswith(f".{allowed_lower}"):
             return True
     
     # Verificar whitelist customizada
     if settings.WHITELIST_DOMAINS:
-        whitelist = [d.strip() for d in settings.WHITELIST_DOMAINS.split(",") if d.strip()]
+        whitelist = [d.strip().lower() for d in settings.WHITELIST_DOMAINS.split(",") if d.strip()]
         for domain in whitelist:
             if domain.startswith("*."):
                 # Wildcard: *.example.com
@@ -64,20 +78,43 @@ def _is_allowed_host(host: str) -> bool:
             elif host == domain or host.endswith(f".{domain}"):
                 return True
     
+    # Rejeitar por padrão (segurança)
+    logger.warning(f"SSRF protection: Host '{host}' not in whitelist")
     return False
 
 
 def _validate_url(url: str) -> bool:
     """
     Valida se a URL é permitida (anti-SSRF).
+    Rejeita URLs fora dos domínios permitidos.
     """
+    if not url:
+        return False
+    
     try:
         parsed = urlparse(url)
+        
+        # Apenas HTTP e HTTPS permitidos
         if parsed.scheme not in ["http", "https"]:
+            logger.warning(f"SSRF protection: Invalid scheme '{parsed.scheme}' in URL")
             return False
-        host = parsed.netloc.split(":")[0]  # Remove porta
-        return _is_allowed_host(host)
-    except Exception:
+        
+        # Extrair host (remover porta)
+        host = parsed.netloc.split(":")[0] if parsed.netloc else ""
+        
+        if not host:
+            return False
+        
+        # Validar host
+        is_allowed = _is_allowed_host(host)
+        
+        if not is_allowed:
+            logger.warning(f"SSRF protection: Host '{host}' not allowed for URL: {url}")
+        
+        return is_allowed
+        
+    except Exception as e:
+        logger.error(f"SSRF protection: Error validating URL '{url}': {e}")
         return False
 
 
