@@ -10,7 +10,7 @@ from app.models.receipt import Receipt
 from app.models.receipt_item import ReceiptItem
 from app.models.product import Product
 from app.utils.encryption import encrypt_sensitive_data
-from app.services.product_matcher import get_or_create_product_from_item
+from app.services.product_matcher import get_or_create_product
 
 logger = logging.getLogger(__name__)
 
@@ -116,12 +116,18 @@ def save_receipt(
         
         # Criar produtos e itens
         for item_data in parsed_data["items"]:
-            # Criar ou buscar produto
-            product = get_or_create_product(
+            # Criar ou buscar produto usando product_matcher
+            product_id = get_or_create_product(
                 db=db,
-                description=item_data["description"],
-                barcode=item_data.get("barcode"),
+                item={
+                    "description": item_data["description"],
+                    "barcode": item_data.get("barcode"),
+                }
             )
+            
+            # Buscar produto criado/encontrado
+            from app.models.product import Product
+            product = db.query(Product).filter(Product.id == product_id).first()
             
             # Criar receipt item
             receipt_item = ReceiptItem(

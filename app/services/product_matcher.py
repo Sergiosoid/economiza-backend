@@ -15,12 +15,12 @@ from app.models.product import Product
 
 logger = logging.getLogger(__name__)
 
-# Stopwords em português (comuns em nomes de produtos)
+# Stopwords e palavras genéricas em português (comuns em nomes de produtos)
 STOPWORDS = {
     'a', 'o', 'e', 'de', 'do', 'da', 'em', 'um', 'uma', 'para', 'com', 'por',
     'que', 'na', 'no', 'as', 'os', 'ao', 'pelo', 'pela', 'dos', 'das',
     'tipo', 'marca', 'sabor', 'sabor', 'unidade', 'un', 'pacote', 'pac',
-    'caixa', 'cx', 'embalagem', 'emb'
+    'caixa', 'cx', 'embalagem', 'emb', 'ref', 'und', 'pct', 'kg', 'g', 'l', 'ml'
 }
 
 # Modelo de embeddings (carregado sob demanda)
@@ -30,10 +30,13 @@ _supabase_client = None
 
 def normalize_name(text: str) -> str:
     """
-    Normaliza o nome do produto:
+    Normaliza o nome do produto para matching:
     - lowercase
     - remove acentos
-    - remove medidas, unidades e stopwords
+    - remove números isolados (5kg, 1l)
+    - remove unidades (kg, g, l, ml)
+    - remove pontuações
+    - remove palavras genéricas ("tipo", "cx", "pct", "ref", "und")
     
     Args:
         text: Nome do produto
@@ -51,19 +54,21 @@ def normalize_name(text: str) -> str:
     normalized = unicodedata.normalize('NFD', normalized)
     normalized = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
     
-    # Remover medidas e unidades (ex: "500g", "1kg", "250ml", "2un")
+    # Remover medidas e unidades com números (ex: "500g", "1kg", "250ml", "2un", "5kg", "1l")
     normalized = re.sub(r'\d+\s*(kg|g|ml|l|lt|un|pct|pac|cx|emb|und|gr|mg|cl|dl)', '', normalized, flags=re.IGNORECASE)
     
-    # Remover números soltos (ex: "produto 123")
+    # Remover números isolados (ex: "produto 123", "5", "1")
     normalized = re.sub(r'\b\d+\b', '', normalized)
     
-    # Remover stopwords
+    # Remover pontuações (mantém apenas letras, números e espaços)
+    normalized = re.sub(r'[^\w\s]', ' ', normalized)
+    
+    # Remover stopwords e palavras genéricas
     words = normalized.split()
-    words = [w for w in words if w not in STOPWORDS and len(w) > 2]
+    words = [w for w in words if w not in STOPWORDS and len(w) > 1]
     normalized = ' '.join(words)
     
-    # Remover espaços extras e caracteres especiais
-    normalized = re.sub(r'[^\w\s]', ' ', normalized)
+    # Remover espaços extras
     normalized = ' '.join(normalized.split())
     
     return normalized.strip()
@@ -92,6 +97,54 @@ def match_by_barcode(db: Session, barcode: str) -> Optional[UUID]:
     return None
 
 
+def fuzzy_match(
+    db: Session,
+    name_normalized: str,
+    threshold: int = 85
+) -> Optional[UUID]:
+    """
+    Busca produto usando fuzzy matching com rapidfuzz.
+    Recebe nome já normalizado.
+    
+    Args:
+        db: Sessão do banco de dados
+        name_normalized: Nome do produto já normalizado
+        threshold: Threshold de similaridade (0-100)
+        
+    Returns:
+        product_id se encontrado com similaridade >= threshold, None caso contrário
+    """
+    if not name_normalized:
+        return None
+    
+    # Buscar todos os produtos
+    products = db.query(Product).all()
+    
+    if not products:
+        return None
+    
+    # Criar lista de nomes normalizados para matching
+    product_names = {p.id: p.normalized_name for p in products if p.normalized_name}
+    
+    if not product_names:
+        return None
+    
+    # Usar rapidfuzz para encontrar melhor match
+    result = process.extractOne(
+        name_normalized,
+        product_names,
+        scorer=fuzz.WRatio,
+        score_cutoff=threshold
+    )
+    
+    if result:
+        product_id, score, matched_name = result
+        logger.debug(f"Product fuzzy matched: '{name_normalized}' -> {product_id} (score: {score:.1f}%)")
+        return product_id
+    
+    return None
+
+
 def fuzzy_match_name(
     db: Session,
     name: str,
@@ -99,10 +152,11 @@ def fuzzy_match_name(
 ) -> Optional[UUID]:
     """
     Busca produto usando fuzzy matching com rapidfuzz.
+    Normaliza o nome antes de fazer o match.
     
     Args:
         db: Sessão do banco de dados
-        name: Nome do produto a buscar
+        name: Nome do produto a buscar (será normalizado)
         threshold: Threshold de similaridade (0-100)
         
     Returns:
@@ -116,29 +170,7 @@ def fuzzy_match_name(
     if not normalized:
         return None
     
-    # Buscar todos os produtos
-    products = db.query(Product).all()
-    
-    if not products:
-        return None
-    
-    # Criar lista de nomes normalizados para matching
-    product_names = {p.id: p.normalized_name for p in products}
-    
-    # Usar rapidfuzz para encontrar melhor match
-    result = process.extractOne(
-        normalized,
-        product_names,
-        scorer=fuzz.WRatio,
-        score_cutoff=threshold
-    )
-    
-    if result:
-        product_id, score, matched_name = result
-        logger.debug(f"Product fuzzy matched: '{name}' -> {product_id} (score: {score:.1f}%)")
-        return product_id
-    
-    return None
+    return fuzzy_match(db, normalized, threshold)
 
 
 def embed_match_name(
@@ -212,16 +244,15 @@ def embed_match_name(
     return []
 
 
-def get_or_create_product_from_item(
+def get_or_create_product(
     db: Session,
     item: Dict[str, Any]
 ) -> UUID:
     """
     Busca ou cria produto usando múltiplas estratégias combinadas:
     1. Match por código de barras (se disponível)
-    2. Fuzzy matching por nome
-    3. Embedding matching (se vector DB configurado)
-    4. Cria novo produto se nenhuma estratégia encontrar match
+    2. Fuzzy matching por nome normalizado
+    3. Fallback: criar produto novo
     
     Args:
         db: Sessão do banco de dados
@@ -242,23 +273,16 @@ def get_or_create_product_from_item(
             logger.info(f"Product matched by barcode: {barcode}")
             return product_id
     
-    # Estratégia 2: Fuzzy matching por nome
+    # Estratégia 2: Fuzzy matching por nome normalizado
     if description:
-        product_id = fuzzy_match_name(db, description, threshold=85)
-        if product_id:
-            logger.info(f"Product matched by fuzzy name: '{description}'")
-            return product_id
+        normalized = normalize_name(description)
+        if normalized:
+            product_id = fuzzy_match(db, normalized, threshold=85)
+            if product_id:
+                logger.info(f"Product matched by fuzzy name: '{description}' -> '{normalized}'")
+                return product_id
     
-    # Estratégia 3: Embedding matching (se configurado)
-    if description:
-        embedding_matches = embed_match_name(db, description, top_k=5)
-        if embedding_matches:
-            # Usar o primeiro resultado (mais similar)
-            product_id = embedding_matches[0]
-            logger.info(f"Product matched by embedding: '{description}'")
-            return product_id
-    
-    # Estratégia 4: Criar novo produto
+    # Estratégia 3: Criar novo produto
     normalized = normalize_name(description) if description else "produto sem nome"
     
     product = Product(
@@ -272,4 +296,8 @@ def get_or_create_product_from_item(
     
     logger.info(f"Product created: {product.id} - '{normalized}'")
     return product.id
+
+
+# Alias para compatibilidade
+get_or_create_product_from_item = get_or_create_product
 
