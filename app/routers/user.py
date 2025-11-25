@@ -20,6 +20,7 @@ from app.models.receipt import Receipt
 from app.models.receipt_item import ReceiptItem
 from app.models.product import Product
 from app.utils.encryption import decrypt_sensitive_data
+from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -158,12 +159,50 @@ async def export_user_data(
             'id': str(user.id),
             'email': user.email,
             'consent_given': user.consent_given,
+            'consent_terms': user.consent_terms if hasattr(user, 'consent_terms') else False,
             'created_at': user.created_at.isoformat() if user.created_at else None,
             'total_receipts': len(receipts)
         }
         zip_file.writestr(
             'user_info.json',
             json.dumps(user_data, indent=2, ensure_ascii=False)
+        )
+        
+        # 5. Produtos únicos do usuário
+        # Buscar todos os produtos que o usuário comprou
+        user_products = db.query(
+            Product.id,
+            Product.normalized_name,
+            Product.barcode,
+            func.avg(ReceiptItem.unit_price).label('avg_price'),
+            func.sum(ReceiptItem.quantity).label('total_quantity'),
+            func.count(ReceiptItem.id).label('purchase_count')
+        ).join(
+            ReceiptItem, Product.id == ReceiptItem.product_id
+        ).join(
+            Receipt, ReceiptItem.receipt_id == Receipt.id
+        ).filter(
+            Receipt.user_id == user_id
+        ).group_by(
+            Product.id,
+            Product.normalized_name,
+            Product.barcode
+        ).all()
+        
+        products_data = []
+        for product in user_products:
+            products_data.append({
+                'id': str(product.id),
+                'normalized_name': product.normalized_name,
+                'barcode': product.barcode,
+                'avg_price': float(product.avg_price) if product.avg_price else None,
+                'total_quantity': float(product.total_quantity),
+                'purchase_count': product.purchase_count
+            })
+        
+        zip_file.writestr(
+            'products.json',
+            json.dumps(products_data, indent=2, ensure_ascii=False)
         )
     
     zip_buffer.seek(0)
@@ -226,12 +265,16 @@ async def delete_user_account(
 
 @router.post("/user/consent")
 async def give_consent(
+    consent_terms: bool = True,
     db: Session = Depends(get_db),
     user_id: UUID = Depends(get_current_user)
 ):
     """
     Endpoint para o usuário dar consentimento para processamento de dados.
     Conforme LGPD, é necessário consentimento explícito.
+    
+    Args:
+        consent_terms: Se o usuário aceita os termos (padrão: True)
     """
     user = db.query(User).filter(
         and_(User.id == user_id, User.deleted_at.is_(None))
@@ -244,9 +287,14 @@ async def give_consent(
         )
     
     user.consent_given = True
+    user.consent_terms = consent_terms
     db.commit()
     
-    logger.info(f"Consent given by user: {user_id}")
+    logger.info(f"Consent given by user: {user_id}, terms: {consent_terms}")
     
-    return {"message": "Consent registered", "consent_given": True}
+    return {
+        "message": "Consent registered",
+        "consent_given": True,
+        "consent_terms": consent_terms
+    }
 

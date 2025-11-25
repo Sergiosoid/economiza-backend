@@ -12,6 +12,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     consent_given = Column(Boolean, default=False, nullable=False)
+    consent_terms = Column(Boolean, default=False, nullable=False)
     is_pro = Column(Boolean, default=False, nullable=False, index=True)
     subscription_id = Column(String(255), nullable=True, index=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
