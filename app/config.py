@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: list[str] = ["*"]
     
+    # Provider API (Webmania/Serpro/Oobj)
+    PROVIDER_API_URL: str = ""
+    PROVIDER_API_KEY: str = ""
+    PROVIDER_TIMEOUT: int = 5
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

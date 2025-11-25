@@ -1,7 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 from app.config import settings
-from app.routers import example
+from app.routers import example, receipts
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 app = FastAPI(
     title="Economiza API",
@@ -21,6 +28,7 @@ app.add_middleware(
 
 # Incluir routers
 app.include_router(example.router, prefix=settings.API_V1_PREFIX, tags=["example"])
+app.include_router(receipts.router, prefix=settings.API_V1_PREFIX, tags=["receipts"])
 
 
 @app.get("/")
