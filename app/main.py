@@ -7,7 +7,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from app.config import settings
-from app.routers import example, receipts, user, ai, payments, analytics
+from app.routers import receipts, user, ai, payments, analytics
 
 # Configurar logging
 logging.basicConfig(
@@ -43,7 +43,6 @@ app.add_middleware(
 )
 
 # Incluir routers
-app.include_router(example.router, prefix=settings.API_V1_PREFIX, tags=["example"])
 app.include_router(receipts.router, prefix=settings.API_V1_PREFIX, tags=["receipts"])
 app.include_router(user.router, prefix=settings.API_V1_PREFIX, tags=["user"])
 app.include_router(ai.router, prefix=settings.API_V1_PREFIX, tags=["ai"])
