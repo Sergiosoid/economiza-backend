@@ -32,18 +32,98 @@ Documentação interativa: `http://localhost:8000/docs`
 
 ## Configuração do Provider de Notas Fiscais
 
-O endpoint `/api/v1/receipts/scan` utiliza um provider externo para buscar dados de notas fiscais. Configure as seguintes variáveis no `.env`:
+O endpoint `/api/v1/receipts/scan` utiliza um provider externo para buscar dados de notas fiscais.
 
-- `PROVIDER_API_URL`: URL base da API do provider (ex: `https://api.webmania.com.br/v1`)
-- `PROVIDER_API_KEY`: Chave de API do provider
-- `PROVIDER_TIMEOUT`: Timeout em segundos (padrão: 5)
+### Variáveis de Ambiente
+
+Configure as seguintes variáveis no `.env`:
+
+```env
+PROVIDER_NAME=webmania  # webmania | oobj | serpro
+PROVIDER_API_URL=https://api.webmania.com.br/nfe
+PROVIDER_API_KEY=<sua_key_aqui>
+PROVIDER_TIMEOUT=8
+```
 
 ### Providers Suportados
 
-O sistema foi projetado para funcionar com providers como:
+O sistema suporta os seguintes providers:
 - **Webmania**: API para consulta de NFe/NFC-e
-- **Serpro**: API pública da Receita Federal
 - **Oobj**: Solução de consulta de notas fiscais
+- **Serpro**: API pública da Receita Federal
+
+### Como Obter API Key
+
+#### Webmania
+
+1. Acesse: https://webmania.com.br
+2. Crie uma conta ou faça login
+3. Vá em **Dashboard** → **API** → **Chaves de API**
+4. Gere uma nova chave de API
+5. Copie a chave e cole no `.env`:
+   ```env
+   PROVIDER_NAME=webmania
+   PROVIDER_API_URL=https://api.webmania.com.br/nfe
+   PROVIDER_API_KEY=sua-chave-aqui
+   ```
+
+**Endpoint:** `GET /nfe/{chave}`  
+**Header:** `Authorization: Bearer {API_KEY}`
+
+#### Oobj
+
+1. Acesse: https://oobj.com.br
+2. Crie uma conta ou faça login
+3. Vá em **Configurações** → **API** → **Tokens**
+4. Gere um novo token de API
+5. Copie o token e cole no `.env`:
+   ```env
+   PROVIDER_NAME=oobj
+   PROVIDER_API_URL=https://api.oobj.com.br
+   PROVIDER_API_KEY=seu-token-aqui
+   ```
+
+**Endpoint:** `POST /consulta`  
+**Header:** `Authorization-Token: {TOKEN}`  
+**Body:** `{"chave": "44_digitos"}`
+
+#### Serpro
+
+1. Acesse: https://www.gov.br/serpro
+2. Crie uma conta no portal de desenvolvedores
+3. Solicite acesso à API de consulta de NFe
+4. Após aprovação, gere suas credenciais
+5. Configure no `.env`:
+   ```env
+   PROVIDER_NAME=serpro
+   PROVIDER_API_URL=https://api.serpro.gov.br/nfe
+   PROVIDER_API_KEY=suas-credenciais-aqui
+   ```
+
+**Endpoint:** `GET /nfe/{chave}`  
+**Header:** `Authorization: Bearer {CREDENTIALS}`
+
+### Validação de URL (Anti-SSRF)
+
+O sistema valida URLs para prevenir ataques SSRF. Apenas os seguintes hosts são permitidos:
+
+- `*.fazenda.gov.br` (qualquer subdomínio)
+- `nfe.fazenda.gov.br`
+- `nfce.fazenda.gov.br`
+- `www.fazenda.gov.br`
+
+URLs de outros hosts serão bloqueadas automaticamente.
+
+### Retries e Tratamento de Erros
+
+O sistema implementa:
+
+- **Retries exponenciais**: Até 3 tentativas com backoff exponencial (1s, 2s, 4s)
+- **Tratamento de erros específicos**:
+  - `404` → `ProviderNotFound` (nota não encontrada)
+  - `429` → `ProviderRateLimit` (rate limit excedido)
+  - `5xx` → `ProviderError` (erro do servidor, com retries)
+- **Timeout configurável**: Padrão 8 segundos
 
 ### Exemplo de Resposta Esperada do Provider
 
@@ -167,26 +247,23 @@ curl -X POST "http://localhost:8000/api/v1/receipts/scan" \
    - Cria `receipt_items`
 6. **Retorna receipt_id** para o app
 
-### Configurar Provider Real
+### Modo de Desenvolvimento (Sem Provider)
 
-Para usar um provider real (Webmania/Serpro/Oobj), configure no `.env`:
-
-```env
-PROVIDER_API_URL=https://api.webmania.com.br/v1
-PROVIDER_API_KEY=sua-chave-api-aqui
-PROVIDER_TIMEOUT=5
-```
-
-**Sem provider configurado**, o sistema retorna dados fake para desenvolvimento:
+**Sem provider configurado** (deixe `PROVIDER_API_KEY` vazio), o sistema retorna dados fake para desenvolvimento:
 - Loja: "SUPERMERCADO EXEMPLO"
 - CNPJ: "12345678000100"
 - Itens de exemplo (Arroz, Feijão, Açúcar)
 
+Isso permite desenvolvimento e testes sem necessidade de credenciais reais.
+
+### Modo de Produção (Com Provider)
+
 **Com provider configurado**, o sistema:
-- Faz requisição HTTP para `PROVIDER_API_URL/nfe/{chave}`
-- Usa `PROVIDER_API_KEY` no header Authorization
-- Converte XML para dict se necessário
-- Faz retry (2x) com backoff em caso de timeout
+- Faz requisição HTTP para o endpoint correto do provider
+- Usa headers de autenticação específicos de cada provider
+- Converte XML para dict automaticamente se necessário
+- Faz retry (até 3x) com backoff exponencial em caso de erro
+- Trata erros específicos (404, 429, 5xx) adequadamente
 
 ## Criptografia de Dados Sensíveis
 
