@@ -75,9 +75,27 @@ async def create_checkout_session(
     plan_config = PLANS[plan]
     
     try:
+        # Criar ou buscar customer no Stripe
+        customer_id = user.stripe_customer_id
+        if not customer_id:
+            # Criar novo customer
+            customer = stripe.Customer.create(
+                email=user.email,
+                metadata={
+                    'user_id': str(user_id)
+                }
+            )
+            customer_id = customer.id
+            
+            # Salvar customer_id no banco
+            user.stripe_customer_id = customer_id
+            db.commit()
+            logger.info(f"Created Stripe customer: {customer_id} for user: {user_id}")
+        
         # Criar sessão de checkout no Stripe
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
+            customer=customer_id,
             line_items=[{
                 'price': plan_config['price_id'],
                 'quantity': 1,
@@ -85,7 +103,6 @@ async def create_checkout_session(
             mode='subscription',
             success_url=f"{settings.FRONTEND_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{settings.FRONTEND_URL}/payment/cancel",
-            customer_email=user.email,
             metadata={
                 'user_id': str(user_id),
                 'plan': plan
@@ -171,21 +188,29 @@ async def stripe_webhook(
             session = event_data
             user_id = session.get('metadata', {}).get('user_id')
             subscription_id = session.get('subscription')
+            customer_id = session.get('customer')
             
             if user_id and subscription_id:
+                # Buscar subscription para obter customer_id se não estiver na session
+                if not customer_id:
+                    subscription = stripe.Subscription.retrieve(subscription_id)
+                    customer_id = subscription.customer
+                
                 _update_user_subscription(
                     db=db,
                     user_id=UUID(user_id),
+                    customer_id=customer_id,
                     subscription_id=subscription_id,
                     is_pro=True
                 )
-                logger.info(f"User {user_id} upgraded to PRO (subscription: {subscription_id})")
+                logger.info(f"User {user_id} upgraded to PRO (subscription: {subscription_id}, customer: {customer_id})")
         
         elif event_type == 'customer.subscription.updated':
             # Assinatura atualizada
             subscription = event_data
             subscription_id = subscription.get('id')
             status_sub = subscription.get('status')
+            customer_id = subscription.get('customer')
             user_id = subscription.get('metadata', {}).get('user_id')
             
             if user_id and subscription_id:
@@ -193,6 +218,7 @@ async def stripe_webhook(
                 _update_user_subscription(
                     db=db,
                     user_id=UUID(user_id),
+                    customer_id=customer_id,
                     subscription_id=subscription_id,
                     is_pro=is_pro
                 )
@@ -225,7 +251,8 @@ def _update_user_subscription(
     db: Session,
     user_id: UUID,
     subscription_id: Optional[str],
-    is_pro: bool
+    is_pro: bool,
+    customer_id: Optional[str] = None
 ):
     """
     Atualiza status de assinatura do usuário.
@@ -237,10 +264,15 @@ def _update_user_subscription(
         return
     
     user.is_pro = is_pro
-    user.subscription_id = subscription_id
+    user.stripe_subscription_id = subscription_id
+    
+    # Atualizar customer_id se fornecido
+    if customer_id:
+        user.stripe_customer_id = customer_id
+    
     db.commit()
     
-    logger.info(f"User {user_id} updated: is_pro={is_pro}, subscription_id={subscription_id}")
+    logger.info(f"User {user_id} updated: is_pro={is_pro}, subscription_id={subscription_id}, customer_id={customer_id}")
 
 
 @router.get("/payments/subscription-status")
@@ -261,7 +293,8 @@ async def get_subscription_status(
     
     return {
         "is_pro": user.is_pro,
-        "subscription_id": user.subscription_id,
+        "subscription_id": user.stripe_subscription_id,
+        "customer_id": user.stripe_customer_id,
         "plan": "pro" if user.is_pro else None
     }
 
