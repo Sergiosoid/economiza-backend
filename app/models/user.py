@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Boolean
+from sqlalchemy import Column, String, DateTime, Boolean, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import uuid
@@ -16,6 +16,9 @@ class User(Base):
     is_pro = Column(Boolean, default=False, nullable=False, index=True)
     stripe_customer_id = Column(String(255), nullable=True, index=True)
     subscription_id = Column(String(255), nullable=True, index=True)
+    credits = Column(Integer, default=0, nullable=False)
+    credits_purchased = Column(Integer, default=0, nullable=False)
+    credits_used = Column(Integer, default=0, nullable=False)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

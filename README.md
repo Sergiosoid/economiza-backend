@@ -359,6 +359,107 @@ curl -X POST "http://localhost:8000/api/v1/receipts/scan" \
    - Cria `receipt_items`
 6. **Retorna receipt_id** para o app
 
+### 🔧 DEV_REAL_MODE (Modo de Testes Realista)
+
+O `DEV_REAL_MODE` é um modo especial de desenvolvimento que permite testar o sistema com dados fake mesmo quando um provider real está configurado. Isso é útil para:
+
+- **Desenvolvimento local**: Testar funcionalidades sem fazer requisições reais aos providers
+- **Testes automatizados**: Garantir que os testes não dependam de APIs externas
+- **Debugging**: Isolar problemas sem depender de serviços externos
+- **CI/CD**: Executar pipelines sem credenciais de produção
+
+#### Como Funciona
+
+Quando `DEV_REAL_MODE=true`:
+- O sistema **ignora** o provider configurado (`PROVIDER_NAME`)
+- Sempre retorna dados fake através do método `_get_fake_data()`
+- Não faz requisições HTTP reais aos providers
+- Valida chaves de acesso (44 dígitos) mas usa dados simulados
+
+#### Ativação/Desativação
+
+**Ativar DEV_REAL_MODE:**
+
+Adicione ao arquivo `.env`:
+```env
+DEV_REAL_MODE=true
+PROVIDER_NAME=fake  # ou qualquer outro provider
+DEV_MODE=true
+```
+
+**Desativar DEV_REAL_MODE:**
+
+```env
+DEV_REAL_MODE=false
+# ou simplesmente remova a variável
+```
+
+#### Comportamento
+
+**Com `DEV_REAL_MODE=true`:**
+- ✅ Retorna dados fake mesmo com `PROVIDER_NAME=webmania`
+- ✅ Não faz requisições HTTP reais
+- ✅ Valida formato de chave (44 dígitos)
+- ✅ Usa chave padrão se chave inválida for fornecida
+- ✅ Permite desenvolvimento sem credenciais reais
+
+**Com `DEV_REAL_MODE=false` ou não definido:**
+- ✅ Usa provider real se `PROVIDER_NAME` estiver configurado
+- ✅ Faz requisições HTTP reais aos providers
+- ✅ Requer credenciais válidas (`PROVIDER_APP_KEY`, `PROVIDER_APP_SECRET`)
+- ✅ Retorna dados fake apenas se `PROVIDER_NAME=fake`
+
+#### Limitações
+
+- **Dados sempre fake**: Não retorna dados reais de notas fiscais
+- **Não testa integração real**: Não valida se credenciais do provider estão corretas
+- **Não testa rate limits**: Não verifica limites de requisições dos providers
+- **Não testa erros reais**: Não simula erros específicos dos providers (404, 429, etc.)
+
+#### Quando Usar
+
+**Use `DEV_REAL_MODE=true` quando:**
+- Desenvolvendo funcionalidades locais
+- Executando testes automatizados
+- Debugging sem depender de APIs externas
+- Em ambientes CI/CD sem credenciais
+
+**Use `DEV_REAL_MODE=false` quando:**
+- Testando integração real com providers
+- Validando credenciais de API
+- Testando rate limits e erros
+- Preparando para produção
+
+#### Trocar para Provider Real
+
+Para usar o provider real após desenvolvimento:
+
+1. **Desative DEV_REAL_MODE:**
+   ```env
+   DEV_REAL_MODE=false
+   ```
+
+2. **Configure credenciais reais:**
+   ```env
+   PROVIDER_NAME=webmania
+   PROVIDER_API_URL=https://api.webmania.com.br/2/nfce/consulta
+   PROVIDER_APP_KEY=sua-app-key-real
+   PROVIDER_APP_SECRET=sua-app-secret-real
+   ```
+
+3. **Reinicie o servidor:**
+   ```bash
+   uvicorn app.main:app --reload
+   ```
+
+4. **Teste com chave real:**
+   ```bash
+   curl -X POST http://localhost:8000/api/v1/receipts/scan \
+     -H "Authorization: Bearer test" \
+     -H "Content-Type: application/json" \
+     -d '{"qr_text": "35200112345678901234567890123456789012345678"}'
+   ```
+
 ### Modo de Desenvolvimento (Sem Provider)
 
 **Sem provider configurado** (deixe `PROVIDER_API_KEY` vazio), o sistema retorna dados fake para desenvolvimento:

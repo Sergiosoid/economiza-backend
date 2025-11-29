@@ -310,8 +310,17 @@ class ProviderClient:
             ProviderRateLimit: Se exceder rate limit (429)
             ProviderUnauthorized: Se houver erro de autenticação (401/403)
         """
-        # Modo fake: retornar dados fake sem fazer requisições
-        if self.provider_name == "fake":
+        # Modo fake ou modo DEV_REAL: retornar dados fake sem fazer requisições.
+        dev_real_mode = False
+        try:
+            dev_real_mode = bool(getattr(settings, "DEV_REAL_MODE", False))
+        except Exception:
+            dev_real_mode = False
+
+        if self.provider_name == "fake" or dev_real_mode:
+            if not key or not re.match(r'^\d{44}$', key):
+                fake_key = "352001" + ("0" * 38)
+                return self._get_fake_data(fake_key)
             return self._get_fake_data(key)
         
         # Modo real: validar configuração
@@ -393,11 +402,15 @@ class ProviderClient:
         """
         logger.info(f"Fetching note from URL: {url}")
         
-        # Modo fake: extrair chave e retornar dados fake
-        if self.provider_name == "fake":
+        # Modo fake ou modo DEV_REAL
+        try:
+            dev_real_mode = bool(getattr(settings, "DEV_REAL_MODE", False))
+        except Exception:
+            dev_real_mode = False
+
+        if self.provider_name == "fake" or dev_real_mode:
             access_key = _extract_key_from_url(url)
             if not access_key:
-                # Se não conseguir extrair, usar chave padrão
                 access_key = "35200112345678901234567890123456789012345678"
             return self._get_fake_data(access_key)
         

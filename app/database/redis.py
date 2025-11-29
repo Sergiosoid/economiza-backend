@@ -2,25 +2,24 @@
 Conexão Redis para rate limiting e cache
 """
 import logging
-import aioredis
-from typing import Optional
+import redis.asyncio as redis
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_redis_client: Optional[aioredis.Redis] = None
+redis_client = None
 
 
-async def get_redis() -> aioredis.Redis:
+async def get_redis():
     """
     Retorna cliente Redis singleton.
     Cria conexão se não existir.
     """
-    global _redis_client
+    global redis_client
     
-    if _redis_client is None:
+    if redis_client is None:
         try:
-            _redis_client = await aioredis.from_url(
+            redis_client = redis.from_url(
                 settings.REDIS_URL,
                 encoding="utf-8",
                 decode_responses=True
@@ -34,14 +33,14 @@ async def get_redis() -> aioredis.Redis:
             else:
                 raise
     
-    return _redis_client
+    return redis_client
 
 
 async def close_redis():
     """Fecha conexão Redis."""
-    global _redis_client
-    if _redis_client:
-        await _redis_client.close()
-        _redis_client = None
+    global redis_client
+    if redis_client:
+        await redis_client.close()
+        redis_client = None
         logger.info("Redis connection closed")
 

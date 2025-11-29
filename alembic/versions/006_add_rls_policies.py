@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision = '006_add_rls_policies'
-down_revision = '005_add_stripe_customer_id'
+down_revision = '005_stripe_customer_id'
 branch_labels = None
 depends_on = None
 

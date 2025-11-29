@@ -5,6 +5,11 @@ from app.models.product import Product
 from app.models.receipt import Receipt
 from app.models.receipt_item import ReceiptItem
 from app.models.analytics_cache import AnalyticsCache
+from app.models.credit_usage import CreditUsage
+from app.models.unit import Unit
+from app.models.shopping_list import ShoppingList, ShoppingListItem
+from app.models.shopping_list_execution import ShoppingListExecution
+from app.models.notification import Notification
 
 __all__ = [
     "Base",
@@ -14,5 +19,11 @@ __all__ = [
     "Receipt",
     "ReceiptItem",
     "AnalyticsCache",
+    "CreditUsage",
+    "Unit",
+    "ShoppingList",
+    "ShoppingListItem",
+    "ShoppingListExecution",
+    "Notification",
 ]
 

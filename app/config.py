@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ENVIRONMENT: str = "development"
     DEV_MODE: bool = True  # Modo desenvolvimento (permite token "test")
+    DEV_REAL_MODE: bool = False  # Modo de testes realista (usa fake provider mesmo com provider real configurado)
     
     # JWT Interno
     JWT_SECRET: str = ""  # Secret para JWT interno (se vazio, usa SECRET_KEY)
@@ -30,6 +31,7 @@ class Settings(BaseSettings):
     PROVIDER_APP_KEY: Optional[str] = None
     PROVIDER_APP_SECRET: Optional[str] = None
     PROVIDER_TIMEOUT: int = 10
+    PROVIDER_MONTHLY_LIMIT: Optional[int] = None  # Limite mensal de requisições ao provider (None = sem limite)
     WHITELIST_DOMAINS: str = ""  # Domínios permitidos separados por vírgula
     
     # Vector DB (Supabase) - Opcional

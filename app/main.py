@@ -7,7 +7,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from app.config import settings
-from app.routers import receipts, user, ai, payments, analytics
+from app.routers import receipts, user, ai, payments, analytics, products, credits, shopping_lists, notifications
 
 # Configurar logging
 logging.basicConfig(
@@ -51,6 +51,15 @@ app.include_router(user.router, prefix=settings.API_V1_PREFIX, tags=["user"])
 app.include_router(ai.router, prefix=settings.API_V1_PREFIX, tags=["ai"])
 app.include_router(payments.router, prefix=settings.API_V1_PREFIX, tags=["payments"])
 app.include_router(analytics.router, prefix=settings.API_V1_PREFIX, tags=["analytics"])
+app.include_router(products.router, prefix=f"{settings.API_V1_PREFIX}/products", tags=["products"])
+app.include_router(credits.router, prefix=settings.API_V1_PREFIX, tags=["credits"])
+app.include_router(shopping_lists.router, prefix=settings.API_V1_PREFIX, tags=["shopping-lists"])
+app.include_router(notifications.router, prefix=settings.API_V1_PREFIX, tags=["notifications"])
+
+# Incluir router de desenvolvimento apenas se DEV_MODE=True
+if settings.DEV_MODE:
+    from app.routers import dev_seed
+    app.include_router(dev_seed.router, prefix=settings.API_V1_PREFIX, tags=["dev"])
 
 
 

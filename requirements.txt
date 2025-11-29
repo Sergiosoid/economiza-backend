@@ -20,5 +20,6 @@ slowapi==0.1.9
 cryptography==41.0.7
 stripe==7.0.0
 PyJWT==2.8.0
-aioredis==2.0.1
+python-jose[cryptography]==3.3.0
+httpx==0.24.1
 

@@ -7,7 +7,7 @@ import logging
 from app.database import get_db
 from app.models.user import User
 from app.config import settings
-from app.services.supabase_auth import verify_supabase_token
+from app.services.supabase_auth import validate_token
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,14 @@ def get_or_create_user_from_supabase(
     db.commit()
     db.refresh(user)
     
+    # Em modo DEV, setar consentimento automaticamente
+    if settings.DEV_MODE:
+        user.consent_given = True
+        user.consent_terms = True  # Boolean: True indica consentimento automático em DEV
+        db.commit()
+        db.refresh(user)
+        logger.info(f"Auto-consent applied (DEV_MODE): user_id={user.id}")
+    
     logger.info(f"User created from Supabase token: {user.id} ({email})")
     return user
 
@@ -138,7 +146,7 @@ async def get_current_user(
 
     # Validar token Supabase JWT
     try:
-        payload = verify_supabase_token(token)
+        payload = await validate_token(token)
         
         # Extrair informações do payload
         supabase_sub = payload.get("sub")
@@ -162,12 +170,9 @@ async def get_current_user(
         logger.info(f"Authenticated user (Supabase): {user.id} ({email})")
         return user.id
         
-    except ValueError as e:
-        logger.warning(f"Token validation failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid authentication credentials: {str(e)}"
-        )
+    except HTTPException:
+        # Re-raise HTTPException diretamente
+        raise
     except Exception as e:
         logger.error(f"Unexpected error during authentication: {e}", exc_info=True)
         raise HTTPException(

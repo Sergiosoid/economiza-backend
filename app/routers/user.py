@@ -321,7 +321,7 @@ async def give_consent(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="rate limit exceeded"
         )
-    """
+    
     user = db.query(User).filter(
         and_(User.id == user_id, User.deleted_at.is_(None))
     ).first()

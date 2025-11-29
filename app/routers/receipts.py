@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from uuid import UUID
 from app.database import get_db
-from app.dependencies.auth import get_current_user
+from app.services.supabase_auth import get_current_user
+from app.dependencies.auth import get_or_create_user_from_supabase
 from app.utils.qr_extractor import extract_key_or_url
 from app.services.provider_client import fetch_by_url, fetch_by_key, ProviderError
 from app.services.receipt_parser import parse_note
@@ -18,9 +19,7 @@ from app.services.receipt_service import (
     save_receipt
 )
 from app.models.receipt import Receipt
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from slowapi import Limiter
+from app.middleware.rate_limit import check_rate_limit, get_rate_limit_key
 from app.tasks.receipt_tasks import process_receipt_task
 from app.config import settings
 
@@ -93,7 +92,6 @@ def _should_process_in_background(raw_note: dict) -> bool:
 @router.post(
     "/receipts/scan",
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(get_current_user)],
     responses={
         200: {"description": "Receipt salvo com sucesso"},
         202: {"description": "Receipt em processamento em background"},
@@ -107,7 +105,7 @@ async def scan_receipt(
     request: Request,
     scan_request: ScanReceiptRequest,
     db: Session = Depends(get_db),
-    user_id: UUID = Depends(get_current_user)
+    user=Depends(get_current_user)
 ):
     """
     Endpoint para escanear QR code de nota fiscal e salvar no banco.
@@ -125,6 +123,20 @@ async def scan_receipt(
     5. Parseia e salva (ou enfileira)
     6. Retorna receipt_id ou task_id
     """
+    # Obter user_id do banco a partir do token
+    user_id_str = user.get("sub")
+    email = user.get("email")
+    
+    if not user_id_str or not email:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: missing sub or email"
+        )
+    
+    # Buscar ou criar usuário no banco
+    db_user = get_or_create_user_from_supabase(db, user_id_str, email)
+    user_id = db_user.id
+    
     # Rate limiting: 10 requisições/min por usuário
     rate_limit_key = get_rate_limit_key(request, user_id)
     if not await check_rate_limit(rate_limit_key, limit=10, window_seconds=60, request=request):
@@ -136,20 +148,8 @@ async def scan_receipt(
     
     logger.info("qr_received", extra={"user_id": str(user_id), "qr_length": len(scan_request.qr_text)})
     
-    # Verificar consentimento (LGPD)
-    from app.models.user import User
-    from sqlalchemy import and_
-    user = db.query(User).filter(
-        and_(User.id == user_id, User.deleted_at.is_(None))
-    ).first()
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    if not user.consent_given:
+    # Verificar consentimento (LGPD) - ignorar em DEV_MODE
+    if not db_user.consent_given and not settings.DEV_MODE:
         logger.warning(f"Scan attempt without consent: user_id={user_id}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -269,63 +269,79 @@ async def scan_receipt(
 
 @router.get(
     "/receipts/list",
-    dependencies=[Depends(get_current_user)],
-    responses={
-        200: {"description": "Lista de receipts do usuário"},
-    }
+    responses={200: {"description": "Lista de receipts do usuário"}}
 )
 async def list_receipts(
     db: Session = Depends(get_db),
-    user_id: UUID = Depends(get_current_user),
+    user=Depends(get_current_user),
     limit: int = 50,
     offset: int = 0
 ):
     """
-    Lista todas as notas fiscais do usuário.
-    
-    Args:
-        limit: Número máximo de resultados (padrão: 50)
-        offset: Número de resultados para pular (padrão: 0)
-        
-    Returns:
-        Lista de receipts ordenados por data de criação (mais recentes primeiro)
+    Lista todas as notas fiscais do usuário, incluindo itens.
     """
     try:
-        receipts = db.query(Receipt).filter(
-            Receipt.user_id == user_id
-        ).order_by(
-            Receipt.created_at.desc()
-        ).limit(limit).offset(offset).all()
-        
+        user_id_str = user.get("sub")
+        email = user.get("email")
+
+        if not user_id_str or not email:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid token: missing sub or email"
+            )
+
+        db_user = get_or_create_user_from_supabase(db, user_id_str, email)
+        user_id = db_user.id
+
+        receipts = (
+            db.query(Receipt)
+            .filter(Receipt.user_id == user_id)
+            .order_by(Receipt.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+            .all()
+        )
+
         receipts_data = []
-        for receipt in receipts:
+        for r in receipts:
+            items_data = []
+            for item in r.items:
+                items_data.append({
+                    "id": str(item.id),
+                    "description": item.description,
+                    "quantity": float(item.quantity),
+                    "unit_price": float(item.unit_price),
+                    "total_price": float(item.total_price),
+                    "tax_value": float(item.tax_value),
+                    "product_id": str(item.product_id) if item.product_id else None,
+                })
+
             receipts_data.append({
-                "id": str(receipt.id),
-                "store_name": receipt.store_name,
-                "store_cnpj": receipt.store_cnpj,
-                "total_value": float(receipt.total_value),
-                "total_tax": float(receipt.total_tax),
-                "emitted_at": receipt.emitted_at.isoformat() if receipt.emitted_at else None,
-                "created_at": receipt.created_at.isoformat() if receipt.created_at else None,
+                "id": str(r.id),
+                "store_name": r.store_name,
+                "store_cnpj": r.store_cnpj,
+                "total_value": float(r.total_value),
+                "subtotal": float(r.subtotal),
+                "total_tax": float(r.total_tax),
+                "emitted_at": r.emitted_at.isoformat() if r.emitted_at else None,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "items": items_data
             })
-        
+
         return {
             "receipts": receipts_data,
             "total": len(receipts_data),
             "limit": limit,
-            "offset": offset
+            "offset": offset,
         }
+
     except Exception as e:
         logger.error(f"Erro ao listar receipts: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Erro ao listar notas fiscais"
-        )
+        raise HTTPException(status_code=500, detail="Erro ao listar notas fiscais")
 
 
 @router.get(
     "/receipts/{receipt_id}",
-    dependencies=[Depends(get_current_user)],
     responses={
         200: {"description": "Detalhes do receipt"},
         404: {"description": "Receipt não encontrado"},
@@ -334,7 +350,7 @@ async def list_receipts(
 async def get_receipt(
     receipt_id: UUID,
     db: Session = Depends(get_db),
-    user_id: UUID = Depends(get_current_user)
+    user=Depends(get_current_user)
 ):
     """
     Busca detalhes de uma nota fiscal específica.
@@ -346,6 +362,20 @@ async def get_receipt(
         Detalhes completos da nota fiscal incluindo itens
     """
     try:
+        # Obter user_id do banco a partir do token
+        user_id_str = user.get("sub")
+        email = user.get("email")
+        
+        if not user_id_str or not email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: missing sub or email"
+            )
+        
+        # Buscar ou criar usuário no banco
+        db_user = get_or_create_user_from_supabase(db, user_id_str, email)
+        user_id = db_user.id
+        
         receipt = db.query(Receipt).filter(
             Receipt.id == receipt_id,
             Receipt.user_id == user_id
